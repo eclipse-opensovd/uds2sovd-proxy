@@ -1,0 +1,9 @@
+.env
+.cache
+.gradle
+.vscode
+
+build
+/target
+
+compile_commands.json
