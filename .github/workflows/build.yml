@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+
+name: Rust CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_DENY_VERSION: 0.18.9
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-deny
+        if: runner.os == 'Linux'
+        run: cargo install --locked --version ${{ env.CARGO_DENY_VERSION }} cargo-deny
+      - name: Build
+        run: cargo build --locked --verbose
+      - name: Check licenses
+        if: runner.os == 'Linux'
+        run: cargo deny check licenses
+      - name: Check advisories
+        if: runner.os == 'Linux'
+        run: cargo deny check advisories
+      - name: Check allowed sources
+        if: runner.os == 'Linux'
+        run: cargo deny check sources
+      - name: Check banned practises
+        if: runner.os == 'Linux'
+        run: cargo deny check bans
+      - name: Run tests
+        run: cargo test --locked -- --show-output
