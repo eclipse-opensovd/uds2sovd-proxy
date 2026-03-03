@@ -397,7 +397,11 @@ impl DoipMessage {
     // version in every response. No production callers exist in this branch yet —
     // server handlers live on feature/doip-async-server and have not been ported here.
     #[allow(dead_code)]
-    pub(crate) fn with_version(version: u8, payload_type: PayloadType, payload: Bytes) -> Result<Self> {
+    pub(crate) fn with_version(
+        version: u8,
+        payload_type: PayloadType,
+        payload: Bytes,
+    ) -> Result<Self> {
         Ok(Self {
             header: DoipHeader {
                 version,
@@ -770,7 +774,8 @@ mod tests {
     #[test]
     fn create_vehicle_id_broadcast() {
         // Empty payload for discovery
-        let msg = DoipMessage::new(PayloadType::VehicleIdentificationRequest, Bytes::new()).unwrap();
+        let msg =
+            DoipMessage::new(PayloadType::VehicleIdentificationRequest, Bytes::new()).unwrap();
 
         assert_eq!(msg.header.payload_length, 0);
         assert_eq!(msg.message_length(), 8); // Just the header

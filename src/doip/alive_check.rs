@@ -12,10 +12,10 @@
  */
 //! Alive Check handlers (ISO 13400-2)
 
+use super::{DoipParseable, DoipSerializable};
+use crate::DoipError;
 use bytes::{BufMut, BytesMut};
 use tracing::warn;
-use crate::DoipError;
-use super::{DoipParseable, DoipSerializable};
 
 // Alive Check Request (0x0007) - no payload
 // Server sends this to check if tester is still connected
@@ -49,7 +49,10 @@ impl DoipParseable for Response {
             .get(..Self::LEN)
             .and_then(|s| s.try_into().ok())
             .ok_or_else(|| {
-                let e = DoipError::PayloadTooShort { expected: Self::LEN, actual: payload.len() };
+                let e = DoipError::PayloadTooShort {
+                    expected: Self::LEN,
+                    actual: payload.len(),
+                };
                 warn!("AliveCheck Response parse failed: {}", e);
                 e
             })?;

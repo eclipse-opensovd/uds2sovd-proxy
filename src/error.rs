@@ -218,7 +218,10 @@ mod tests {
                 service: 0x10,
                 nrc: 0x11,
             },
-            DoipError::PayloadTooShort { expected: 8, actual: 4 },
+            DoipError::PayloadTooShort {
+                expected: 8,
+                actual: 4,
+            },
             DoipError::UnknownRoutingActivationResponseCode(0x99),
             DoipError::EmptyUserData,
             DoipError::InvalidVinLength(10),

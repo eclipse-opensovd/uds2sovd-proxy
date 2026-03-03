@@ -12,10 +12,10 @@
  */
 //! Routing Activation handlers (ISO 13400-2:2019)
 
+use super::{check_min_len, too_short, DoipParseable, DoipSerializable};
+use crate::DoipError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::warn;
-use crate::DoipError;
-use super::{DoipParseable, DoipSerializable, too_short, check_min_len};
 
 // Response codes per ISO 13400-2:2019 Table 25
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,8 +261,8 @@ mod tests {
     const TESTER_ADDR_END: usize = 2;
     const ENTITY_ADDR_END: usize = 4;
     const RESP_CODE_IDX: usize = 4;
-    const OEM_DATA_START: usize = Response::MIN_LEN;  // 9
-    const OEM_DATA_END: usize = Response::MAX_LEN;    // 13
+    const OEM_DATA_START: usize = Response::MIN_LEN; // 9
+    const OEM_DATA_END: usize = Response::MAX_LEN; // 13
 
     #[test]
     fn response_code_success_check() {
@@ -341,7 +341,10 @@ mod tests {
         assert_eq!(bytes.len(), Response::MIN_LEN);
         assert_eq!(&bytes[..TESTER_ADDR_END], &[0x0E, 0x80]);
         assert_eq!(&bytes[TESTER_ADDR_END..ENTITY_ADDR_END], &[0x10, 0x00]);
-        assert_eq!(bytes[RESP_CODE_IDX], ResponseCode::SuccessfullyActivated as u8);
+        assert_eq!(
+            bytes[RESP_CODE_IDX],
+            ResponseCode::SuccessfullyActivated as u8
+        );
     }
 
     #[test]
@@ -351,7 +354,10 @@ mod tests {
         let bytes = resp.to_bytes();
 
         assert_eq!(bytes.len(), Response::MAX_LEN);
-        assert_eq!(&bytes[OEM_DATA_START..OEM_DATA_END], &[0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(
+            &bytes[OEM_DATA_START..OEM_DATA_END],
+            &[0x12, 0x34, 0x56, 0x78]
+        );
     }
 
     #[test]

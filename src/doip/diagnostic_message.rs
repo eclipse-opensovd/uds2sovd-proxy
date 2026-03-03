@@ -12,10 +12,10 @@
  */
 //! Diagnostic Message handlers (ISO 13400-2:2019)
 
+use super::{check_min_len, too_short, DoipParseable, DoipSerializable};
+use crate::DoipError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::warn;
-use crate::DoipError;
-use super::{DoipParseable, DoipSerializable, too_short, check_min_len};
 
 const ADDRESS_BYTES: usize = 2;
 const HEADER_BYTES: usize = ADDRESS_BYTES * 2;

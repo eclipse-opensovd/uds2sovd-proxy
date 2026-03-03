@@ -20,8 +20,8 @@ pub mod payload;
 pub mod routing_activation;
 pub mod vehicle_id;
 
-use bytes::{Bytes, BytesMut};
 use crate::DoipError;
+use bytes::{Bytes, BytesMut};
 
 /// Trait for DoIP message types that can be parsed from a raw payload slice.
 ///
@@ -67,7 +67,10 @@ pub trait DoipSerializable {
 
 /// Build a [`DoipError::PayloadTooShort`] from the given slice and expected length.
 pub(crate) fn too_short(payload: &[u8], expected: usize) -> DoipError {
-    DoipError::PayloadTooShort { expected, actual: payload.len() }
+    DoipError::PayloadTooShort {
+        expected,
+        actual: payload.len(),
+    }
 }
 
 /// Return `Err` if `payload` is shorter than `expected` bytes.
@@ -82,9 +85,8 @@ pub(crate) fn check_min_len(payload: &[u8], expected: usize) -> std::result::Res
 // Re-export core types and constants for convenient access.
 // Constants are exported to allow external testing and custom DoIP message construction.
 pub use header_parser::{
-    DoipCodec, DoipHeader, DoipMessage, GenericNackCode, PayloadType,
-    DEFAULT_PROTOCOL_VERSION, DEFAULT_PROTOCOL_VERSION_INV, DOIP_HEADER_LENGTH,
-    MAX_DOIP_MESSAGE_SIZE, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V3,
-    DOIP_VERSION_DEFAULT, DOIP_HEADER_VERSION_MASK,
+    DoipCodec, DoipHeader, DoipMessage, GenericNackCode, PayloadType, DEFAULT_PROTOCOL_VERSION,
+    DEFAULT_PROTOCOL_VERSION_INV, DOIP_HEADER_LENGTH, DOIP_HEADER_VERSION_MASK,
+    DOIP_VERSION_DEFAULT, MAX_DOIP_MESSAGE_SIZE, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V3,
 };
 pub use payload::DoipPayload;

@@ -13,10 +13,10 @@
 
 //! Vehicle Identification handlers (ISO 13400-2:2019)
 
+use super::{check_min_len, too_short, DoipParseable, DoipSerializable};
+use crate::DoipError;
 use bytes::{BufMut, BytesMut};
 use tracing::warn;
-use crate::DoipError;
-use super::{DoipParseable, DoipSerializable, too_short, check_min_len};
 
 // Wire-format field lengths for VehicleIdentificationResponse (ISO 13400-2:2019)
 const VIN_LEN: usize = 17;
@@ -26,14 +26,14 @@ const GID_LEN: usize = 6;
 const FURTHER_ACTION_LEN: usize = 1;
 
 // Pre-computed byte offsets derived from field layout
-const VIN_END: usize = VIN_LEN;                                      // 17
-const ADDR_START: usize = VIN_END;                                    // 17
-const ADDR_END: usize = ADDR_START + LOGICAL_ADDR_LEN;               // 19
-const EID_START: usize = ADDR_END;                                    // 19
-const EID_END: usize = EID_START + EID_LEN;                          // 25
-const GID_START: usize = EID_END;                                     // 25
-const GID_END: usize = GID_START + GID_LEN;                          // 31
-const FURTHER_ACTION_IDX: usize = GID_END;                            // 31
+const VIN_END: usize = VIN_LEN; // 17
+const ADDR_START: usize = VIN_END; // 17
+const ADDR_END: usize = ADDR_START + LOGICAL_ADDR_LEN; // 19
+const EID_START: usize = ADDR_END; // 19
+const EID_END: usize = EID_START + EID_LEN; // 25
+const GID_START: usize = EID_END; // 25
+const GID_END: usize = GID_START + GID_LEN; // 31
+const FURTHER_ACTION_IDX: usize = GID_END; // 31
 const SYNC_STATUS_IDX: usize = FURTHER_ACTION_IDX + FURTHER_ACTION_LEN; // 32
 
 // Vehicle Identification Request (0x0001) - no payload
@@ -126,8 +126,8 @@ pub struct Response {
 }
 
 impl Response {
-    pub const MIN_LEN: usize = SYNC_STATUS_IDX;      // 32: VIN(17) + Addr(2) + EID(6) + GID(6) + FurtherAction(1)
-    pub const MAX_LEN: usize = SYNC_STATUS_IDX + 1;  // 33: adds optional SyncStatus(1)
+    pub const MIN_LEN: usize = SYNC_STATUS_IDX; // 32: VIN(17) + Addr(2) + EID(6) + GID(6) + FurtherAction(1)
+    pub const MAX_LEN: usize = SYNC_STATUS_IDX + 1; // 33: adds optional SyncStatus(1)
 
     #[must_use]
     pub fn new(vin: [u8; 17], logical_address: u16, eid: [u8; 6], gid: [u8; 6]) -> Self {
@@ -202,39 +202,36 @@ impl DoipParseable for Response {
             return Err(e);
         };
 
-        let vin: [u8; VIN_LEN] =
-            payload
-                .get(..VIN_END)
-                .and_then(|s| s.try_into().ok())
-                .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let vin: [u8; VIN_LEN] = payload
+            .get(..VIN_END)
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
 
-        let addr_bytes: [u8; LOGICAL_ADDR_LEN] =
-            payload
-                .get(ADDR_START..ADDR_END)
-                .and_then(|s| s.try_into().ok())
-                .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let addr_bytes: [u8; LOGICAL_ADDR_LEN] = payload
+            .get(ADDR_START..ADDR_END)
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
         let logical_address = u16::from_be_bytes(addr_bytes);
 
-        let eid: [u8; EID_LEN] =
-            payload
-                .get(EID_START..EID_END)
-                .and_then(|s| s.try_into().ok())
-                .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let eid: [u8; EID_LEN] = payload
+            .get(EID_START..EID_END)
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
 
-        let gid: [u8; GID_LEN] =
-            payload
-                .get(GID_START..GID_END)
-                .and_then(|s| s.try_into().ok())
-                .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let gid: [u8; GID_LEN] = payload
+            .get(GID_START..GID_END)
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
 
         let further_action_byte = payload
             .get(FURTHER_ACTION_IDX)
             .copied()
             .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
-        let further_action = FurtherAction::try_from(further_action_byte)
-            .unwrap_or(FurtherAction::NoFurtherAction);
+        let further_action =
+            FurtherAction::try_from(further_action_byte).unwrap_or(FurtherAction::NoFurtherAction);
 
-        let sync_status = payload.get(SYNC_STATUS_IDX)
+        let sync_status = payload
+            .get(SYNC_STATUS_IDX)
             .map(|&b| SyncStatus::try_from(b).unwrap_or(SyncStatus::Synchronized));
 
         Ok(Self {

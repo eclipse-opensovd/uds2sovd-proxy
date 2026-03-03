@@ -27,11 +27,11 @@
 //! }
 //! ```
 
-use crate::DoipError;
 use super::{
-    DoipMessage, DoipParseable, GenericNackCode, PayloadType,
-    alive_check, diagnostic_message, routing_activation, vehicle_id,
+    alive_check, diagnostic_message, routing_activation, vehicle_id, DoipMessage, DoipParseable,
+    GenericNackCode, PayloadType,
 };
+use crate::DoipError;
 
 /// A fully-parsed DoIP message payload.
 ///
@@ -121,10 +121,10 @@ impl DoipPayload {
                 vehicle_id::Response::parse(payload)?,
             )),
             PayloadType::GenericNack => {
-                let byte = payload
-                    .first()
-                    .copied()
-                    .ok_or(DoipError::PayloadTooShort { expected: 1, actual: 0 })?;
+                let byte = payload.first().copied().ok_or(DoipError::PayloadTooShort {
+                    expected: 1,
+                    actual: 0,
+                })?;
                 let code = GenericNackCode::try_from(byte)
                     .map_err(|b| DoipError::UnknownPayloadType(u16::from(b)))?;
                 Ok(Self::GenericNack(code))
@@ -165,8 +165,8 @@ impl DoipPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use crate::doip::{DoipMessage, PayloadType};
+    use bytes::Bytes;
 
     fn make_msg(payload_type: PayloadType, payload: impl Into<Bytes>) -> DoipMessage {
         DoipMessage {
