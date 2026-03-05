@@ -13,7 +13,7 @@
 
 //! Vehicle Identification handlers (ISO 13400-2:2019)
 
-use super::{check_min_len, too_short, DoipParseable, DoipSerializable};
+use super::{DoipParseable, DoipSerializable, check_min_len, too_short};
 use crate::DoipError;
 use bytes::{BufMut, BytesMut};
 use tracing::warn;
@@ -43,7 +43,7 @@ pub struct Request;
 // Vehicle Identification Request with EID (0x0002) - 6 byte EID
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestWithEid {
-    pub eid: [u8; 6],
+    eid: [u8; 6],
 }
 
 impl RequestWithEid {
@@ -53,12 +53,18 @@ impl RequestWithEid {
     pub fn new(eid: [u8; 6]) -> Self {
         Self { eid }
     }
+
+    /// The EID filter value
+    #[must_use]
+    pub fn eid(&self) -> &[u8; 6] {
+        &self.eid
+    }
 }
 
 // Vehicle Identification Request with VIN (0x0003) - 17 byte VIN
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestWithVin {
-    pub vin: [u8; 17],
+    vin: [u8; 17],
 }
 
 impl RequestWithVin {
@@ -67,6 +73,12 @@ impl RequestWithVin {
     #[must_use]
     pub fn new(vin: [u8; 17]) -> Self {
         Self { vin }
+    }
+
+    /// The VIN filter value as bytes
+    #[must_use]
+    pub fn vin(&self) -> &[u8; 17] {
+        &self.vin
     }
 
     #[must_use]
@@ -94,6 +106,12 @@ impl TryFrom<u8> for FurtherAction {
     }
 }
 
+impl From<FurtherAction> for u8 {
+    fn from(action: FurtherAction) -> u8 {
+        action as u8
+    }
+}
+
 // Synchronization status per ISO 13400-2:2019 Table 22
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -113,16 +131,22 @@ impl TryFrom<u8> for SyncStatus {
     }
 }
 
+impl From<SyncStatus> for u8 {
+    fn from(status: SyncStatus) -> u8 {
+        status as u8
+    }
+}
+
 // Vehicle Identification Response (0x0004)
 // VIN(17) + LogicalAddr(2) + EID(6) + GID(6) + FurtherAction(1) = 32 bytes min
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
-    pub vin: [u8; 17],
-    pub logical_address: u16,
-    pub eid: [u8; 6],
-    pub gid: [u8; 6],
-    pub further_action: FurtherAction,
-    pub sync_status: Option<SyncStatus>,
+    vin: [u8; 17],
+    logical_address: u16,
+    eid: [u8; 6],
+    gid: [u8; 6],
+    further_action: FurtherAction,
+    sync_status: Option<SyncStatus>,
 }
 
 impl Response {
@@ -200,7 +224,7 @@ impl DoipParseable for Response {
         if let Err(e) = check_min_len(payload, Self::MIN_LEN) {
             warn!("VehicleId Response parse failed: {}", e);
             return Err(e);
-        };
+        }
 
         let vin: [u8; VIN_LEN] = payload
             .get(..VIN_END)
@@ -227,12 +251,13 @@ impl DoipParseable for Response {
             .get(FURTHER_ACTION_IDX)
             .copied()
             .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
-        let further_action =
-            FurtherAction::try_from(further_action_byte).unwrap_or(FurtherAction::NoFurtherAction);
+        let further_action = FurtherAction::try_from(further_action_byte)
+            .map_err(DoipError::UnknownFurtherAction)?;
 
         let sync_status = payload
             .get(SYNC_STATUS_IDX)
-            .map(|&b| SyncStatus::try_from(b).unwrap_or(SyncStatus::Synchronized));
+            .map(|&b| SyncStatus::try_from(b).map_err(DoipError::UnknownSyncStatus))
+            .transpose()?;
 
         Ok(Self {
             vin,
@@ -247,7 +272,7 @@ impl DoipParseable for Response {
 
 impl DoipSerializable for Response {
     fn serialized_len(&self) -> Option<usize> {
-        Some(Self::MIN_LEN + if self.sync_status.is_some() { 1 } else { 0 })
+        Some(Self::MIN_LEN + usize::from(self.sync_status.is_some()))
     }
 
     fn write_to(&self, buf: &mut BytesMut) {
@@ -255,9 +280,9 @@ impl DoipSerializable for Response {
         buf.put_u16(self.logical_address);
         buf.extend_from_slice(&self.eid);
         buf.extend_from_slice(&self.gid);
-        buf.put_u8(self.further_action as u8);
+        buf.put_u8(u8::from(self.further_action));
         if let Some(status) = self.sync_status {
-            buf.put_u8(status as u8);
+            buf.put_u8(u8::from(status));
         }
     }
 }

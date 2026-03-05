@@ -13,11 +13,12 @@
 //! Error Types for `DoIP` Server (ISO 13400-2:2019 & ISO 14229-1:2020)
 
 use std::io;
+use std::net::AddrParseError;
 use thiserror::Error;
 
 // Re-export from the canonical definitions in the protocol modules
 pub use crate::doip::diagnostic_message::NackCode as DiagnosticNackCode;
-pub use crate::doip::header_parser::GenericNackCode;
+pub use crate::doip::header::GenericNackCode;
 pub use crate::doip::routing_activation::ResponseCode as RoutingActivationCode;
 
 /// Result type alias for `DoIP` operations
@@ -31,6 +32,15 @@ pub enum DoipError {
 
     #[error("Configuration error: {0}")]
     InvalidConfig(String),
+
+    #[error("Configuration file error: {0}")]
+    ConfigFileError(String),
+
+    #[error("Hex decode error: {0}")]
+    HexDecodeError(String),
+
+    #[error("Invalid address: {0}")]
+    InvalidAddress(#[from] AddrParseError),
 
     #[error("Invalid protocol version: expected 0x{expected:02X}, got 0x{actual:02X}")]
     InvalidProtocolVersion { expected: u8, actual: u8 },
@@ -52,6 +62,12 @@ pub enum DoipError {
 
     #[error("unknown diagnostic nack code: {0:#04x}")]
     UnknownNackCode(u8),
+
+    #[error("unknown further action byte: {0:#04x}")]
+    UnknownFurtherAction(u8),
+
+    #[error("unknown sync status byte: {0:#04x}")]
+    UnknownSyncStatus(u8),
 
     #[error("diagnostic message has no user data")]
     EmptyUserData,

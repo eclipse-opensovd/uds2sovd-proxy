@@ -11,15 +11,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `DoIP` Header Parser and Codec
+//! `DoIP` Header Types
 //!
-//! This module implements the core `DoIP` protocol header parsing and message framing
-//! according to ISO 13400-2:2019. It provides:
-//!
-//! - **Header Validation**: Checks protocol version, payload types, and message sizes
-//! - **Message Framing**: Tokio codec for TCP stream processing with proper buffering
-//! - **Type Safety**: Strongly-typed payload types and error codes per ISO specification
-//! - **`DoS` Protection**: Configurable max message size limits (default 4MB)
+//! Defines the core `DoIP` protocol types for header parsing and message structures
+//! according to ISO 13400-2:2019.
 //!
 //! The `DoIP` header consists of 8 bytes:
 //! - Protocol version (1 byte) + inverse version (1 byte)
@@ -28,10 +23,10 @@
 //!
 //! This module accepts protocol versions 0x01, 0x02, 0x03, and 0xFF to support
 //! both ISO 13400-2:2012 and ISO 13400-2:2019 specifications.
+//!
+//! See [`codec`](super::codec) for the Tokio TCP framing codec.
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::io;
-use tokio_util::codec::{Decoder, Encoder};
+use bytes::{BufMut, Bytes, BytesMut};
 use tracing::{debug, warn};
 
 /// Generic Header NACK codes (ISO 13400-2:2019 Table 17)
@@ -62,19 +57,6 @@ impl TryFrom<u8> for GenericNackCode {
         }
     }
 }
-
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum ParseError {
-    #[error("Invalid header: {0}")]
-    InvalidHeader(String),
-    /// Payload length exceeds `u32::MAX` (DoIP protocol limit is 4 MB)
-    #[error("DoIP payload exceeds u32::MAX (protocol limit is 4 MB)")]
-    PayloadTooLarge,
-    #[error("IO error: {0}")]
-    IoError(#[from] io::Error),
-}
-
-pub(crate) type Result<T> = std::result::Result<T, ParseError>;
 
 /// `DoIP` protocol version 0x01 (legacy, pre-ISO 13400-2:2012)
 pub const PROTOCOL_VERSION_V1: u8 = 0x01;
@@ -148,6 +130,12 @@ impl TryFrom<u16> for PayloadType {
     }
 }
 
+impl From<PayloadType> for u16 {
+    fn from(pt: PayloadType) -> u16 {
+        pt as u16
+    }
+}
+
 impl PayloadType {
     /// Returns minimum payload length for this payload type (ISO 13400-2:2019 Section 7)
     ///
@@ -187,23 +175,23 @@ impl PayloadType {
 /// during validation but don't cause parsing failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DoipHeader {
-    pub version: u8,
-    pub inverse_version: u8,
-    pub payload_type: u16,
-    pub payload_length: u32,
+    version: u8,
+    inverse_version: u8,
+    payload_type: u16,
+    payload_length: u32,
 }
 
 impl DoipHeader {
     /// Parse a `DoIP` header from a byte slice
     ///
     /// # Errors
-    /// Returns `ParseError::InvalidHeader` if data is less than 8 bytes
-    pub(crate) fn parse(data: &[u8]) -> Result<Self> {
+    /// Returns [`crate::DoipError::InvalidHeader`] if data is less than 8 bytes.
+    pub(crate) fn parse(data: &[u8]) -> std::result::Result<Self, crate::DoipError> {
         let header: [u8; DOIP_HEADER_LENGTH] = data
             .get(..DOIP_HEADER_LENGTH)
             .and_then(|s| s.try_into().ok())
             .ok_or_else(|| {
-                ParseError::InvalidHeader(format!(
+                crate::DoipError::InvalidHeader(format!(
                     "DoIP header too short: expected {}, got {}",
                     DOIP_HEADER_LENGTH,
                     data.len()
@@ -215,31 +203,6 @@ impl DoipHeader {
             inverse_version: header[1],
             payload_type: u16::from_be_bytes([header[2], header[3]]),
             payload_length: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
-        })
-    }
-
-    /// Parse a `DoIP` header from a mutable Bytes buffer
-    ///
-    /// # Errors
-    /// Returns `ParseError::InvalidHeader` if buffer is less than 8 bytes
-    //
-    // Used by the streaming decode path in the TCP/UDP server handlers
-    // (feature/doip-async-server). Not yet called in this branch because
-    // the server handler layer has not been ported here yet.
-    #[allow(dead_code)]
-    pub(crate) fn parse_from_buf(buf: &mut Bytes) -> Result<Self> {
-        if buf.len() < DOIP_HEADER_LENGTH {
-            return Err(ParseError::InvalidHeader(format!(
-                "DoIP header too short: expected {}, got {}",
-                DOIP_HEADER_LENGTH,
-                buf.len()
-            )));
-        }
-        Ok(Self {
-            version: buf.get_u8(),
-            inverse_version: buf.get_u8(),
-            payload_type: buf.get_u16(),
-            payload_length: buf.get_u32(),
         })
     }
 
@@ -284,7 +247,10 @@ impl DoipHeader {
             warn!("Message too large: {} bytes", self.payload_length);
             return Some(GenericNackCode::MessageTooLarge);
         }
-        if (self.payload_length as usize) < payload_type.min_payload_length() {
+        let Ok(payload_len_usize) = usize::try_from(self.payload_length) else {
+            return Some(GenericNackCode::MessageTooLarge);
+        };
+        if payload_len_usize < payload_type.min_payload_length() {
             warn!(
                 "Payload too short for {:?}: {} < {}",
                 payload_type,
@@ -302,10 +268,14 @@ impl DoipHeader {
         self.validate().is_none()
     }
 
-    /// Returns the total message length (header + payload)
+    /// Returns the total message length (header + payload), or `None` if
+    /// `payload_length` overflows `usize` (impossible on 32/64-bit platforms,
+    /// but handled explicitly to avoid any panic path).
     #[must_use]
-    pub fn message_length(&self) -> usize {
-        DOIP_HEADER_LENGTH.saturating_add(self.payload_length as usize)
+    pub fn message_length(&self) -> Option<usize> {
+        usize::try_from(self.payload_length)
+            .ok()
+            .map(|pl| DOIP_HEADER_LENGTH.saturating_add(pl))
     }
 
     /// Serialize header to bytes
@@ -321,6 +291,30 @@ impl DoipHeader {
         buf.put_u8(self.inverse_version);
         buf.put_u16(self.payload_type);
         buf.put_u32(self.payload_length);
+    }
+
+    /// Protocol version byte
+    #[must_use]
+    pub fn version(&self) -> u8 {
+        self.version
+    }
+
+    /// Inverted protocol version byte
+    #[must_use]
+    pub fn inverse_version(&self) -> u8 {
+        self.inverse_version
+    }
+
+    /// Raw payload type as `u16`
+    #[must_use]
+    pub fn payload_type(&self) -> u16 {
+        self.payload_type
+    }
+
+    /// Payload length in bytes
+    #[must_use]
+    pub fn payload_length(&self) -> u32 {
+        self.payload_length
     }
 }
 
@@ -355,63 +349,23 @@ impl std::fmt::Display for DoipHeader {
 /// ISO 13400-2 uses the term "message" throughout the specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoipMessage {
-    pub header: DoipHeader,
-    pub payload: Bytes,
+    pub(crate) header: DoipHeader,
+    pub(crate) payload: Bytes,
 }
 
 impl DoipMessage {
     /// Create a new `DoIP` message with the default protocol version.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ParseError::PayloadTooLarge`] if `payload.len()` exceeds `u32::MAX`.
-    /// In practice this cannot occur because the `DoIP` codec enforces a 4 MB message limit.
-    //
-    // Called by server handlers to build outgoing response messages.
-    // No production callers exist in this branch yet — server handlers live
-    // on feature/doip-async-server and have not been ported here.
-    #[allow(dead_code)]
-    pub(crate) fn new(payload_type: PayloadType, payload: Bytes) -> Result<Self> {
-        Ok(Self {
+    #[cfg(test)]
+    pub(crate) fn new(payload_type: PayloadType, payload: Bytes) -> Self {
+        Self {
             header: DoipHeader {
                 version: DEFAULT_PROTOCOL_VERSION,
                 inverse_version: DEFAULT_PROTOCOL_VERSION_INV,
-                payload_type: payload_type as u16,
-                payload_length: u32::try_from(payload.len())
-                    .map_err(|_| ParseError::PayloadTooLarge)?,
+                payload_type: u16::from(payload_type),
+                payload_length: u32::try_from(payload.len()).expect("test payload fits in u32"),
             },
             payload,
-        })
-    }
-
-    /// Create a `DoIP` message with a specific protocol version.
-    ///
-    /// This mirrors the version from the incoming request.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ParseError::PayloadTooLarge`] if `payload.len()` exceeds `u32::MAX`.
-    /// In practice this cannot occur because the `DoIP` codec enforces a 4 MB message limit.
-    //
-    // Required by ISO 13400-2:2019: the server must mirror the client's protocol
-    // version in every response. No production callers exist in this branch yet —
-    // server handlers live on feature/doip-async-server and have not been ported here.
-    #[allow(dead_code)]
-    pub(crate) fn with_version(
-        version: u8,
-        payload_type: PayloadType,
-        payload: Bytes,
-    ) -> Result<Self> {
-        Ok(Self {
-            header: DoipHeader {
-                version,
-                inverse_version: version ^ DOIP_HEADER_VERSION_MASK, // Compute inverse
-                payload_type: payload_type as u16,
-                payload_length: u32::try_from(payload.len())
-                    .map_err(|_| ParseError::PayloadTooLarge)?,
-            },
-            payload,
-        })
+        }
     }
 
     /// Create a DoIP message with a raw (unparsed) payload type
@@ -425,9 +379,7 @@ impl DoipMessage {
                 version: DEFAULT_PROTOCOL_VERSION,
                 inverse_version: DEFAULT_PROTOCOL_VERSION_INV,
                 payload_type,
-                // Safe cast: DoIP messages are limited to MAX_DOIP_MESSAGE_SIZE (4MB)
-                // which fits in u32. The codec enforces this limit during decode.
-                payload_length: payload.len() as u32,
+                payload_length: u32::try_from(payload.len()).expect("test payload fits in u32"),
             },
             payload,
         }
@@ -435,6 +387,16 @@ impl DoipMessage {
 
     pub fn payload_type(&self) -> Option<PayloadType> {
         PayloadType::try_from(self.header.payload_type).ok()
+    }
+
+    /// The `DoIP` header
+    pub fn header(&self) -> &DoipHeader {
+        &self.header
+    }
+
+    /// The message payload bytes
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
     }
 
     /// Returns the total message length (header + payload)
@@ -451,134 +413,6 @@ impl DoipMessage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DecodeState {
-    Header,
-    Payload(DoipHeader),
-}
-
-#[derive(Debug)]
-pub struct DoipCodec {
-    state: DecodeState,
-    max_payload_size: u32,
-}
-
-impl DoipCodec {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            state: DecodeState::Header,
-            max_payload_size: MAX_DOIP_MESSAGE_SIZE,
-        }
-    }
-
-    /// Create codec with custom max payload size limit
-    ///
-    /// The size is u32 to match the `DoIP` header `payload_length` field (4 bytes).
-    /// This provides `DoS` protection by rejecting oversized messages early.
-    #[must_use]
-    pub fn with_max_payload_size(max_size: u32) -> Self {
-        Self {
-            state: DecodeState::Header,
-            max_payload_size: max_size,
-        }
-    }
-}
-
-impl Default for DoipCodec {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Decoder for DoipCodec {
-    type Item = DoipMessage;
-    type Error = io::Error;
-
-    // Using fully qualified std::result::Result because the module-level Result<T>
-    // type alias uses ParseError, but the Decoder trait requires io::Error.
-    fn decode(
-        &mut self,
-        src: &mut BytesMut,
-    ) -> std::result::Result<Option<Self::Item>, Self::Error> {
-        loop {
-            match self.state {
-                DecodeState::Header => {
-                    if src.len() < DOIP_HEADER_LENGTH {
-                        // Reserve space to reduce reallocations when more data arrives
-                        src.reserve(DOIP_HEADER_LENGTH);
-                        return Ok(None);
-                    }
-
-                    // Log raw bytes for debugging
-                    let header_slice = src.get(..DOIP_HEADER_LENGTH).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "buffer too short")
-                    })?;
-                    debug!("Received raw header bytes: {:02X?}", header_slice);
-
-                    let header = DoipHeader::parse(header_slice)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-                    if let Some(nack_code) = header.validate() {
-                        warn!(
-                            "Header validation failed: {:?} - raw bytes: {:02X?}",
-                            nack_code, header_slice
-                        );
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("validation failed: {nack_code:?}"),
-                        ));
-                    }
-
-                    if header.payload_length > self.max_payload_size {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!(
-                                "payload too large: {} > {}",
-                                header.payload_length, self.max_payload_size
-                            ),
-                        ));
-                    }
-
-                    // Pre-allocate buffer for the complete message
-                    src.reserve(header.message_length());
-                    self.state = DecodeState::Payload(header);
-                }
-
-                DecodeState::Payload(header) => {
-                    let total_len = header.message_length();
-                    if src.len() < total_len {
-                        // Still waiting for complete payload - this is normal for large messages
-                        // or when data arrives in multiple TCP packets
-                        return Ok(None);
-                    }
-
-                    let _ = src.split_to(DOIP_HEADER_LENGTH);
-                    let payload = src.split_to(header.payload_length as usize).freeze();
-
-                    self.state = DecodeState::Header;
-                    return Ok(Some(DoipMessage { header, payload }));
-                }
-            }
-        }
-    }
-}
-
-impl Encoder<DoipMessage> for DoipCodec {
-    type Error = io::Error;
-
-    fn encode(
-        &mut self,
-        item: DoipMessage,
-        dst: &mut BytesMut,
-    ) -> std::result::Result<(), Self::Error> {
-        dst.reserve(item.message_length());
-        item.header.write_to(dst);
-        dst.extend_from_slice(&item.payload);
-        Ok(())
-    }
-}
-
 // ============================================================================
 // Unit Tests
 // ============================================================================
@@ -586,6 +420,8 @@ impl Encoder<DoipMessage> for DoipCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::doip::codec::DoipCodec;
+    use tokio_util::codec::{Decoder, Encoder};
 
     // --- Helper to build a valid DoIP header quickly ---
     fn make_header(payload_type: u16, payload_len: u32) -> DoipHeader {
@@ -764,7 +600,7 @@ mod tests {
     fn create_tester_present_message() {
         // UDS TesterPresent: 0x3E 0x00
         let uds = Bytes::from_static(&[0x0E, 0x80, 0x10, 0x01, 0x3E, 0x00]);
-        let msg = DoipMessage::new(PayloadType::DiagnosticMessage, uds).unwrap();
+        let msg = DoipMessage::new(PayloadType::DiagnosticMessage, uds);
 
         assert_eq!(msg.header.payload_type, 0x8001);
         assert_eq!(msg.header.payload_length, 6);
@@ -774,8 +610,7 @@ mod tests {
     #[test]
     fn create_vehicle_id_broadcast() {
         // Empty payload for discovery
-        let msg =
-            DoipMessage::new(PayloadType::VehicleIdentificationRequest, Bytes::new()).unwrap();
+        let msg = DoipMessage::new(PayloadType::VehicleIdentificationRequest, Bytes::new());
 
         assert_eq!(msg.header.payload_length, 0);
         assert_eq!(msg.message_length(), 8); // Just the header
@@ -790,7 +625,7 @@ mod tests {
 
     #[test]
     fn serialize_message_to_wire_format() {
-        let msg = DoipMessage::new(PayloadType::AliveCheckRequest, Bytes::new()).unwrap();
+        let msg = DoipMessage::new(PayloadType::AliveCheckRequest, Bytes::new());
         let wire = msg.to_bytes();
 
         assert_eq!(wire.len(), 8);
@@ -876,7 +711,7 @@ mod tests {
     fn encode_diagnostic_message() {
         let mut codec = DoipCodec::new();
         let payload = Bytes::from_static(&[0x0E, 0x80, 0x10, 0x01, 0x3E]);
-        let msg = DoipMessage::new(PayloadType::DiagnosticMessage, payload).unwrap();
+        let msg = DoipMessage::new(PayloadType::DiagnosticMessage, payload);
 
         let mut buf = BytesMut::new();
         codec.encode(msg, &mut buf).unwrap();
@@ -896,8 +731,7 @@ mod tests {
         let original = DoipMessage::new(
             PayloadType::DiagnosticMessage,
             Bytes::from_static(&[0x0E, 0x80, 0x10, 0x01, 0x22, 0xF1, 0x90]),
-        )
-        .unwrap();
+        );
 
         let mut buf = BytesMut::new();
         codec.encode(original.clone(), &mut buf).unwrap();
@@ -936,20 +770,9 @@ mod tests {
 
     #[test]
     fn parse_error_shows_useful_message() {
-        let err = ParseError::InvalidHeader("buffer too short".into());
-        let msg = format!("{err}");
-        assert!(msg.contains("Invalid header"));
-        assert!(msg.contains("buffer too short"));
-    }
-
-    #[test]
-    fn io_errors_convert_to_parse_errors() {
-        let io_err = io::Error::new(io::ErrorKind::UnexpectedEof, "connection lost");
-        let parse_err: ParseError = io_err.into();
-        match parse_err {
-            ParseError::IoError(e) => assert_eq!(e.kind(), io::ErrorKind::UnexpectedEof),
-            _ => panic!("expected Io variant"),
-        }
+        let result = DoipHeader::parse(&[]);
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("DoIP header"));
     }
 
     #[test]

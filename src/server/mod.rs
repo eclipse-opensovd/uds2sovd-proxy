@@ -10,8 +10,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-pub mod doip;
-pub mod error;
-pub mod server;
-pub mod uds;
-pub use error::DoipError;
+//! Server Module
+//!
+//! `DoIP` server configuration and session management.
+
+pub mod config;
+pub mod session;
+
+pub use config::ServerConfig;
+pub use session::{Session, SessionManager};

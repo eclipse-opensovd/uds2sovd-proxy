@@ -14,28 +14,30 @@
 //! This module provides the core `DoIP` protocol types and codec for TCP/UDP communication.
 
 pub mod alive_check;
+pub mod codec;
 pub mod diagnostic_message;
-pub mod header_parser;
+pub mod header;
 pub mod payload;
 pub mod routing_activation;
 pub mod vehicle_id;
 
 use crate::DoipError;
 use bytes::{Bytes, BytesMut};
+use tracing::warn;
 
-/// Trait for DoIP message types that can be parsed from a raw payload slice.
+/// Trait for `DoIP` message types that can be parsed from a raw payload slice.
 ///
 /// Implement this for every message struct so callers can decode incoming
-/// DoIP frames through a uniform interface.
+/// `DoIP` frames through a uniform interface.
 pub trait DoipParseable: Sized {
-    /// Parse a DoIP message from a raw payload byte slice.
+    /// Parse a `DoIP` message from a raw payload byte slice.
     ///
     /// # Errors
     /// Returns [`DoipError`] if the payload is malformed or too short.
     fn parse(payload: &[u8]) -> std::result::Result<Self, DoipError>;
 }
 
-/// Trait for DoIP message types that can be serialized to a [`Bytes`] buffer.
+/// Trait for `DoIP` message types that can be serialized to a [`Bytes`] buffer.
 ///
 /// Implement [`write_to`] with the wire-format logic. The default [`to_bytes`]
 /// wraps it in a `BytesMut` and calls `freeze()`, so you never write that
@@ -82,11 +84,30 @@ pub(crate) fn check_min_len(payload: &[u8], expected: usize) -> std::result::Res
     }
 }
 
+/// Extract the first `N` bytes of `payload` as a fixed-size array.
+///
+/// Logs a warning and returns [`DoipError::PayloadTooShort`] when the slice
+/// is shorter than `N` bytes, using `context` to identify the call site in the log.
+pub(crate) fn parse_fixed_slice<const N: usize>(
+    payload: &[u8],
+    context: &str,
+) -> std::result::Result<[u8; N], DoipError> {
+    payload
+        .get(..N)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| {
+            let e = too_short(payload, N);
+            warn!("{} parse failed: {}", context, e);
+            e
+        })
+}
+
 // Re-export core types and constants for convenient access.
 // Constants are exported to allow external testing and custom DoIP message construction.
-pub use header_parser::{
-    DoipCodec, DoipHeader, DoipMessage, GenericNackCode, PayloadType, DEFAULT_PROTOCOL_VERSION,
-    DEFAULT_PROTOCOL_VERSION_INV, DOIP_HEADER_LENGTH, DOIP_HEADER_VERSION_MASK,
-    DOIP_VERSION_DEFAULT, MAX_DOIP_MESSAGE_SIZE, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V3,
+pub use codec::DoipCodec;
+pub use header::{
+    DEFAULT_PROTOCOL_VERSION, DEFAULT_PROTOCOL_VERSION_INV, DOIP_HEADER_LENGTH,
+    DOIP_HEADER_VERSION_MASK, DOIP_VERSION_DEFAULT, DoipHeader, DoipMessage, GenericNackCode,
+    MAX_DOIP_MESSAGE_SIZE, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V3, PayloadType,
 };
 pub use payload::DoipPayload;

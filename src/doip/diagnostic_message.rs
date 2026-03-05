@@ -12,7 +12,7 @@
  */
 //! Diagnostic Message handlers (ISO 13400-2:2019)
 
-use super::{check_min_len, too_short, DoipParseable, DoipSerializable};
+use super::{DoipParseable, DoipSerializable, parse_fixed_slice, too_short};
 use crate::DoipError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::warn;
@@ -27,6 +27,12 @@ const MIN_USER_DATA_BYTES: usize = 1;
 #[repr(u8)]
 pub enum AckCode {
     Acknowledged = 0x00,
+}
+
+impl From<AckCode> for u8 {
+    fn from(code: AckCode) -> u8 {
+        code as u8
+    }
 }
 
 // Diagnostic message negative ack codes per ISO 13400-2:2019 Table 28
@@ -59,13 +65,19 @@ impl TryFrom<u8> for NackCode {
     }
 }
 
+impl From<NackCode> for u8 {
+    fn from(code: NackCode) -> u8 {
+        code as u8
+    }
+}
+
 /// Diagnostic Message - carries UDS data between tester and ECU
 ///
-/// Represents a DoIP diagnostic message as defined in ISO 13400-2:2019.
+/// Represents a `DoIP` diagnostic message as defined in ISO 13400-2:2019.
 /// The message contains source/target addresses and UDS payload data.
 ///
 /// # Wire Format
-/// Payload: SA(2) + TA(2) + user_data(1+)
+/// Payload: SA(2) + TA(2) + `user_data(1`+)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     source_address: u16,
@@ -124,10 +136,10 @@ impl Message {
 
 /// Diagnostic Message Positive Acknowledgment (message type 0x8002)
 ///
-/// Sent by a DoIP entity to acknowledge receipt of a diagnostic message.
+/// Sent by a `DoIP` entity to acknowledge receipt of a diagnostic message.
 ///
 /// # Wire Format  
-/// Payload: SA(2) + TA(2) + ack_code(1) + optional previous_diag_data
+/// Payload: SA(2) + TA(2) + `ack_code(1)` + optional `previous_diag_data`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PositiveAck {
     source_address: u16,
@@ -141,6 +153,7 @@ impl PositiveAck {
     pub const MIN_LEN: usize = HEADER_BYTES + ACK_CODE_BYTES;
 
     /// Create a new positive acknowledgment
+    #[must_use]
     pub fn new(source: u16, target: u16) -> Self {
         Self {
             source_address: source,
@@ -184,11 +197,11 @@ impl PositiveAck {
 
 /// Diagnostic Message Negative Acknowledgment (message type 0x8003)
 ///
-/// Sent by a DoIP entity to indicate rejection of a diagnostic message.
+/// Sent by a `DoIP` entity to indicate rejection of a diagnostic message.
 /// NACK codes are defined in ISO 13400-2:2019 Table 28.
 ///
 /// # Wire Format
-/// Payload: SA(2) + TA(2) + nack_code(1) + optional previous_diag_data
+/// Payload: SA(2) + TA(2) + `nack_code(1)` + optional `previous_diag_data`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NegativeAck {
     source_address: u16,
@@ -202,6 +215,7 @@ impl NegativeAck {
     pub const MIN_LEN: usize = HEADER_BYTES + ACK_CODE_BYTES;
 
     /// Create a new negative acknowledgment
+    #[must_use]
     pub fn new(source: u16, target: u16, code: NackCode) -> Self {
         Self {
             source_address: source,
@@ -245,14 +259,7 @@ impl NegativeAck {
 
 impl DoipParseable for Message {
     fn parse(payload: &[u8]) -> std::result::Result<Self, DoipError> {
-        let header: [u8; HEADER_BYTES] = payload
-            .get(..HEADER_BYTES)
-            .and_then(|s| s.try_into().ok())
-            .ok_or_else(|| {
-                let e = too_short(payload, Self::MIN_LEN);
-                warn!("DiagnosticMessage parse failed: {}", e);
-                e
-            })?;
+        let header: [u8; HEADER_BYTES] = parse_fixed_slice(payload, "DiagnosticMessage")?;
 
         let source_address = u16::from_be_bytes([header[0], header[1]]);
         let target_address = u16::from_be_bytes([header[2], header[3]]);
@@ -293,15 +300,7 @@ impl DoipSerializable for Message {
 
 impl DoipParseable for PositiveAck {
     fn parse(payload: &[u8]) -> std::result::Result<Self, DoipError> {
-        if let Err(e) = check_min_len(payload, Self::MIN_LEN) {
-            warn!("DiagnosticPositiveAck parse failed: {}", e);
-            return Err(e);
-        }
-
-        let header: [u8; HEADER_BYTES] = payload
-            .get(..HEADER_BYTES)
-            .and_then(|s| s.try_into().ok())
-            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let header: [u8; HEADER_BYTES] = parse_fixed_slice(payload, "DiagnosticPositiveAck")?;
 
         let source_address = u16::from_be_bytes([header[0], header[1]]);
         let target_address = u16::from_be_bytes([header[2], header[3]]);
@@ -323,13 +322,13 @@ impl DoipParseable for PositiveAck {
 
 impl DoipSerializable for PositiveAck {
     fn serialized_len(&self) -> Option<usize> {
-        Some(Self::MIN_LEN + self.previous_data.as_ref().map_or(0, |d| d.len()))
+        Some(Self::MIN_LEN + self.previous_data.as_ref().map_or(0, bytes::Bytes::len))
     }
 
     fn write_to(&self, buf: &mut BytesMut) {
         buf.put_u16(self.source_address);
         buf.put_u16(self.target_address);
-        buf.put_u8(self.ack_code as u8);
+        buf.put_u8(u8::from(self.ack_code));
         if let Some(ref data) = self.previous_data {
             buf.extend_from_slice(data);
         }
@@ -338,23 +337,15 @@ impl DoipSerializable for PositiveAck {
 
 impl DoipParseable for NegativeAck {
     fn parse(payload: &[u8]) -> std::result::Result<Self, DoipError> {
-        if let Err(e) = check_min_len(payload, Self::MIN_LEN) {
-            warn!("DiagnosticNegativeAck parse failed: {}", e);
-            return Err(e);
-        }
-
-        let header: [u8; HEADER_BYTES] = payload
-            .get(..HEADER_BYTES)
-            .and_then(|s| s.try_into().ok())
-            .ok_or_else(|| too_short(payload, Self::MIN_LEN))?;
+        let header: [u8; HEADER_BYTES] = parse_fixed_slice(payload, "DiagnosticNegativeAck")?;
 
         let source_address = u16::from_be_bytes([header[0], header[1]]);
         let target_address = u16::from_be_bytes([header[2], header[3]]);
         let nack_code = payload
             .get(HEADER_BYTES)
             .copied()
-            .and_then(|b| NackCode::try_from(b).ok())
-            .unwrap_or(NackCode::TransportProtocolError);
+            .ok_or_else(|| too_short(payload, Self::MIN_LEN))
+            .and_then(NackCode::try_from)?;
 
         let previous_data = payload
             .get(Self::MIN_LEN..)
@@ -372,13 +363,13 @@ impl DoipParseable for NegativeAck {
 
 impl DoipSerializable for NegativeAck {
     fn serialized_len(&self) -> Option<usize> {
-        Some(Self::MIN_LEN + self.previous_data.as_ref().map_or(0, |d| d.len()))
+        Some(Self::MIN_LEN + self.previous_data.as_ref().map_or(0, bytes::Bytes::len))
     }
 
     fn write_to(&self, buf: &mut BytesMut) {
         buf.put_u16(self.source_address);
         buf.put_u16(self.target_address);
-        buf.put_u8(self.nack_code as u8);
+        buf.put_u8(u8::from(self.nack_code));
         if let Some(ref data) = self.previous_data {
             buf.extend_from_slice(data);
         }

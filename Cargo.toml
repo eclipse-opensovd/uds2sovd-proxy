@@ -1,33 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+
 [package]
 name = "doip-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+license = "Apache-2.0"
 
+
+# ---- async runtime ----
 [dependencies]
-# Async runtime
-tokio = { version = "1.35", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio = { version = "1", default-features = false, features = ["io-util"] }
+tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
 
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.9"
+# ---- serialization ----
+serde = { version = "1.0", default-features = false, features = ["std", "derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# ---- tracing & logging ----
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 
-# Error handling
-thiserror = "2.0"
-anyhow = "1.0"
+# ---- error handling ----
+thiserror = { version = "2.0", default-features = false, features = ["std"] }
 
-# Data structures
-bytes = "1.0"
-dashmap = "6.0"
-parking_lot = "0.12"
+# ---- data structures ----
+bytes = { version = "1.0", default-features = false, features = ["std"] }
+parking_lot = { version = "0.12", default-features = false }
 
-# Utilities
-uuid = { version = "1.6", features = ["v4"] }
-clap = { version = "4.4", features = ["derive"] }
+# ---- utility crates ----
+hex = { version = "0.4", default-features = false, features = ["std"] }
 
-[features]
-test-handlers = []
+[lints.clippy]
+# enable pedantic
+pedantic = { level = "warn", priority = -1 }
+## exclude some too pedantic lints for now
+similar_names = "allow"
+module_name_repetitions = "allow"
+
+# additional lints
+unwrap_used = "deny"
+indexing_slicing = "deny"
+
+[profile.release.package."*"]
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

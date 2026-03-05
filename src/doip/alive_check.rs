@@ -40,7 +40,7 @@ impl DoipSerializable for Request {
 // Tester responds with its logical address
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
-    pub source_address: u16,
+    source_address: u16,
 }
 
 impl DoipParseable for Response {
@@ -78,6 +78,12 @@ impl Response {
     #[must_use]
     pub fn new(source_address: u16) -> Self {
         Self { source_address }
+    }
+
+    /// The logical source address of the tester
+    #[must_use]
+    pub fn source_address(&self) -> u16 {
+        self.source_address
     }
 }
 

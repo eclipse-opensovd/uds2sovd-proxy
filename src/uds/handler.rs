@@ -38,15 +38,19 @@ pub mod service_id {
     pub const CLEAR_DTC_INFORMATION: u8 = 0x14;
 }
 
-/// UDS request extracted from `DoIP` diagnostic message
+/// UDS request extracted from a `DoIP` diagnostic message (ISO 14229-1:2020).
 #[derive(Debug, Clone)]
 pub struct UdsRequest {
-    pub source_address: u16,
-    pub target_address: u16,
-    pub payload: Bytes,
+    /// Logical address of the tester sending the request
+    source_address: u16,
+    /// Logical address of the target ECU
+    target_address: u16,
+    /// Raw UDS payload bytes (service ID + data)
+    payload: Bytes,
 }
 
 impl UdsRequest {
+    /// Construct a new `UdsRequest` from address pair and raw UDS payload bytes.
     #[must_use]
     pub fn new(source: u16, target: u16, payload: Bytes) -> Self {
         Self {
@@ -61,17 +65,39 @@ impl UdsRequest {
     pub fn service_id(&self) -> Option<u8> {
         self.payload.first().copied()
     }
+
+    /// Returns the tester's logical source address.
+    #[must_use]
+    pub fn source_address(&self) -> u16 {
+        self.source_address
+    }
+
+    /// Returns the target ECU's logical address.
+    #[must_use]
+    pub fn target_address(&self) -> u16 {
+        self.target_address
+    }
+
+    /// Returns the raw UDS payload bytes.
+    #[must_use]
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
+    }
 }
 
-/// UDS response to be wrapped in `DoIP` diagnostic message
+/// UDS response to be wrapped in a `DoIP` diagnostic message.
 #[derive(Debug, Clone)]
 pub struct UdsResponse {
-    pub source_address: u16,
-    pub target_address: u16,
-    pub payload: Bytes,
+    /// Logical address of the ECU sending the response
+    source_address: u16,
+    /// Logical address of the tester the response is directed to
+    target_address: u16,
+    /// Raw UDS response payload bytes (positive or negative response)
+    payload: Bytes,
 }
 
 impl UdsResponse {
+    /// Construct a new `UdsResponse` from address pair and raw UDS payload bytes.
     #[must_use]
     pub fn new(source: u16, target: u16, payload: Bytes) -> Self {
         Self {
@@ -80,6 +106,24 @@ impl UdsResponse {
             payload,
         }
     }
+
+    /// Returns the ECU's logical source address.
+    #[must_use]
+    pub fn source_address(&self) -> u16 {
+        self.source_address
+    }
+
+    /// Returns the tester's logical target address.
+    #[must_use]
+    pub fn target_address(&self) -> u16 {
+        self.target_address
+    }
+
+    /// Returns the raw UDS response payload bytes.
+    #[must_use]
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
+    }
 }
 
 /// Trait for handling UDS requests
@@ -87,6 +131,11 @@ impl UdsResponse {
 /// Implement this trait to connect the `DoIP` server to a UDS backend
 /// (e.g., UDS2SOVD converter, ODX/MDD handler, or ECU simulator)
 pub trait UdsHandler: Send + Sync {
+    /// Process a UDS `request` and return the corresponding response.
+    ///
+    /// Called by the `DoIP` server for every inbound diagnostic message after
+    /// routing activation. The implementation should decode the UDS service ID,
+    /// execute the requested service, and return a positive or negative response.
     fn handle(&self, request: UdsRequest) -> UdsResponse;
 }
 

@@ -10,7 +10,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-//! Typed dispatch envelope for DoIP message payloads (ISO 13400-2:2019).
+//! Typed dispatch envelope for `DoIP` message payloads (ISO 13400-2:2019).
 //!
 //! [`DoipPayload`] is a strongly-typed enum that wraps every concrete payload
 //! struct. Use [`DoipPayload::parse`] to decode a raw [`DoipMessage`] into
@@ -18,22 +18,26 @@
 //! [`PayloadType`] throughout the codebase.
 //!
 //! # Example
-//! ```ignore
-//! let payload = DoipPayload::parse(&msg)?;
-//! match payload {
-//!     DoipPayload::DiagnosticMessage(m) => handle_diag(m),
-//!     DoipPayload::AliveCheckRequest(_) => send_alive_response(),
-//!     _ => {}
+//! ```no_run
+//! # use doip_server::doip::{DoipMessage, DoipPayload};
+//! # use doip_server::DoipError;
+//! fn dispatch(msg: &DoipMessage) -> Result<(), DoipError> {
+//!     match DoipPayload::parse(msg)? {
+//!         DoipPayload::DiagnosticMessage(m) => println!("UDS payload: {:?}", m),
+//!         DoipPayload::AliveCheckRequest(_) => println!("Alive check received"),
+//!         _ => {}
+//!     }
+//!     Ok(())
 //! }
 //! ```
 
 use super::{
-    alive_check, diagnostic_message, routing_activation, vehicle_id, DoipMessage, DoipParseable,
-    GenericNackCode, PayloadType,
+    DoipMessage, DoipParseable, GenericNackCode, PayloadType, alive_check, diagnostic_message,
+    routing_activation, vehicle_id,
 };
 use crate::DoipError;
 
-/// A fully-parsed DoIP message payload.
+/// A fully-parsed `DoIP` message payload.
 ///
 /// Each variant corresponds to one [`PayloadType`] and wraps the concrete
 /// struct returned by its [`DoipParseable`] impl.
@@ -61,7 +65,7 @@ pub enum DoipPayload {
     VehicleIdentificationRequestWithVin(vehicle_id::RequestWithVin),
     /// `0x0004` – Vehicle Identification Response / Announce
     VehicleIdentificationResponse(vehicle_id::Response),
-    /// `0x0000` – Generic DoIP Header Negative Acknowledgement
+    /// `0x0000` – Generic `DoIP` Header Negative Acknowledgement
     GenericNack(GenericNackCode),
 }
 
@@ -71,16 +75,16 @@ impl DoipPayload {
     /// # Errors
     /// Returns [`DoipError::UnknownPayloadType`] when the `payload_type` field
     /// in the header does not map to a known [`PayloadType`] variant, or when
-    /// the DoIP payload byte is not a recognized `GenericNackCode`.
+    /// the `DoIP` payload byte is not a recognized `GenericNackCode`.
     ///
     /// Returns a more specific [`DoipError`] (e.g. [`DoipError::PayloadTooShort`])
     /// when the payload bytes are present but malformed.
     pub fn parse(msg: &DoipMessage) -> std::result::Result<Self, DoipError> {
-        let payload = msg.payload.as_ref();
+        let payload = msg.payload().as_ref();
 
         let payload_type = msg
             .payload_type()
-            .ok_or(DoipError::UnknownPayloadType(msg.header.payload_type))?;
+            .ok_or(DoipError::UnknownPayloadType(msg.header().payload_type()))?;
 
         match payload_type {
             PayloadType::AliveCheckRequest => Ok(Self::AliveCheckRequest(
@@ -133,7 +137,7 @@ impl DoipPayload {
             | PayloadType::DoipEntityStatusResponse
             | PayloadType::DiagnosticPowerModeRequest
             | PayloadType::DiagnosticPowerModeResponse => {
-                Err(DoipError::UnknownPayloadType(payload_type as u16))
+                Err(DoipError::UnknownPayloadType(u16::from(payload_type)))
             }
         }
     }
@@ -169,15 +173,7 @@ mod tests {
     use bytes::Bytes;
 
     fn make_msg(payload_type: PayloadType, payload: impl Into<Bytes>) -> DoipMessage {
-        DoipMessage {
-            header: crate::doip::DoipHeader {
-                version: crate::doip::DEFAULT_PROTOCOL_VERSION,
-                inverse_version: crate::doip::DEFAULT_PROTOCOL_VERSION_INV,
-                payload_type: payload_type as u16,
-                payload_length: 0,
-            },
-            payload: payload.into(),
-        }
+        DoipMessage::new(payload_type, payload.into())
     }
 
     #[test]
@@ -224,15 +220,7 @@ mod tests {
 
     #[test]
     fn unknown_payload_type_error() {
-        let msg = DoipMessage {
-            header: crate::doip::DoipHeader {
-                version: crate::doip::DEFAULT_PROTOCOL_VERSION,
-                inverse_version: crate::doip::DEFAULT_PROTOCOL_VERSION_INV,
-                payload_type: 0xFFFF,
-                payload_length: 0,
-            },
-            payload: Bytes::new(),
-        };
+        let msg = DoipMessage::with_raw_payload_type(0xFFFF, Bytes::new());
         let err = DoipPayload::parse(&msg).unwrap_err();
         assert!(matches!(err, crate::DoipError::UnknownPayloadType(0xFFFF)));
     }
