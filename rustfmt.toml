@@ -9,11 +9,30 @@
 # https://www.apache.org/licenses/LICENSE-2.0
 
 max_width = 100
+# Rust edition — must match `edition` in [workspace.package].
+# This enables edition-specific formatting rules in stable rustfmt.
+edition = "2024"
 
-# in case rustfmt stopps working again, enable these options
-# to get more information about the error
-# requires to run rustfmt with nightly toolchain
-# for example: `rustfmt +nightly src/diagtype/mod.rs --edition 2024 --verbose`
-# error_on_unformatted = true
-# error_on_line_overflow = true
-#format_strings = true
+# ── Nightly-only rustfmt options ─────────────────────────────────────────────
+# The options below are not yet stable in rustfmt and therefore cannot be
+# placed in this file (stable rustfmt silently ignores unknown keys, which
+# would mask the expected behaviour). They are applied via explicit CLI flags
+# in CI (pr-checks.yml) and are recommended for local development.
+#
+# The nightly toolchain is NOT in rust-toolchain.toml. Install it once:
+#   rustup toolchain install nightly-2025-07-14 --component rustfmt
+#
+# Check formatting (CI-equivalent):
+#   cargo +nightly fmt -- --check \
+#     --config error_on_unformatted=true,error_on_line_overflow=true,\
+#             format_strings=true,group_imports=StdExternalCrate,\
+#             imports_granularity=Crate
+#
+# Auto-fix:
+#   cargo +nightly fmt -- \
+#     --config error_on_unformatted=true,error_on_line_overflow=true,\
+#             format_strings=true,group_imports=StdExternalCrate,\
+#             imports_granularity=Crate
+#
+# These options will be moved into this file once stabilised upstream.
+# Tracking: https://github.com/rust-lang/rustfmt/issues (group_imports, format_strings)

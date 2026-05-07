@@ -8,39 +8,65 @@
 # terms of the Apache License Version 2.0 which is available at
 # https://www.apache.org/licenses/LICENSE-2.0
 
-[package]
-name = "uds2sovd-proxy"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://github.com/eclipse-opensovd/uds2sovd-proxy"
 
-[lints]
-workspace = true
+[workspace]
+resolver = "3"
+members = [
+  # Zero-dep UDS protocol primitives (DiagHandler seam, NRCs, SIDs).
+  "uds",
+  # ISO 13400-2 DoIP transport — no CDA, no SOVD.
+  "doip",
+]
 
-# Lints are aligned with shared-lints.toml from:
-# https://github.com/eclipse-opensovd/cicd-workflows/tree/main/shared-lints
+[workspace.dependencies]
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+futures-util = { version = "0.3", default-features = false }
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
+toml = { version = "0.9", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+anyhow = { version = "1.0", default-features = false }
+bytes = { version = "1.0", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
+hex = { version = "0.4", default-features = false }
+clap = { version = "4.4", default-features = false, features = ["std"] }
+async-trait = { version = "0.1", default-features = false }
+reqwest = { version = "0.12", default-features = false }
+
+uds  = { path = "uds" }
+doip = { path = "doip" }
+
+cda-core = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-database = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-interfaces = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-plugin-security = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+
 [workspace.lints.clippy]
-# enable pedantic
 pedantic = { level = "warn", priority = -1 }
-## exclude some too pedantic lints for now
 similar_names = "allow"
-
-## lints related to runtime panic behavior
-# enforce only checked access to slices to avoid runtime panics
 indexing_slicing = "deny"
-# disallow any unwraps in the production code
-# (unwrap in test code is explicitly allowed)
 unwrap_used = "deny"
-# enforce that arithmetic operations that can produce side effects always use
-# either checked or explicit versions of the operations. eg. `.checked_add(...)`
-# or `.saturating_sub(...)` to avoid unexpected runtime behavior or panics.
 arithmetic_side_effects = "deny"
-
-## lints related to readability of code
-# enforce that references are cloned via eg. `Arc::clone` instead of `.clone()`
-# making it explicit that a reference is cloned here and not the underlying data.
 clone_on_ref_ptr = "warn"
-# enforce that the type suffix of a literal is always appended directly
-# eg. 12u8 instead of 12_u8
 separated_literal_suffix = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
+
+[profile.release.package."*"]
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
+[patch.crates-io]
+flatbuffers = { git = "https://github.com/alexmohr/flatbuffers.git", rev = "0ba3307d" }

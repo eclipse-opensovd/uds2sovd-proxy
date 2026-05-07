@@ -1,0 +1,203 @@
+' SPDX-License-Identifier: Apache-2.0
+' SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+'
+' See the NOTICE file(s) distributed with this work for additional
+' information regarding copyright ownership.
+'
+' This program and the accompanying materials are made available under the
+' terms of the Apache License Version 2.0 which is available at
+' https://www.apache.org/licenses/LICENSE-2.0
+
+@startuml service_resolver_class
+' To regenerate the SVG: plantuml -tsvg service_resolver_class_diagram.puml
+!pragma layout smetana
+
+title Service Resolver – Class Diagram
+<size:11><color:gray>sovd::resolver — MDD-driven UDS encoding / decoding</color></size>
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam noteFontSize 11
+skinparam classFontSize 12
+
+' ─────────────────────────────────────────────────────────────────
+' sovd::resolver
+' Facade (ServiceResolver) owns CdaEcuManager and ecu_name.
+' Sub-components are public fields (not accessors):
+'   resolver : DidResolver      (resolve.rs)   -- DID-to-service resolution
+'   encoder  : ResponseEncoder  (response.rs)  -- UDS response encoding
+'   metadata : MetadataProvider (metadata.rs)  -- MDD parameter queries
+' uds_helpers.rs holds pure free functions only.
+' ─────────────────────────────────────────────────────────────────
+package "sovd::resolver" {
+
+    class ServiceResolver <<facade>> {
+        - resolver : DidResolver
+        - encoder : ResponseEncoder
+        - metadata : MetadataProvider
+        - ecu_name : EcuName
+        == mod.rs -- construction ==
+        + {static} <<async>> new(ecu_name, db, logical, tester) : Result<Self>
+        - {static} <<async>> activate_base_variant(manager) : Result<()>
+        - {static} default_com_params(logical, tester: u16) : ComParams
+        == mod.rs -- facade API ==
+        + ecu_name() : &str
+        + <<async>> resolve(service_type, did, uds) : Option<ResolvedService>
+        + <<async>> build_uds_response(name, sid, did, data) : Result<Vec<u8>>
+        + <<async>> enriched_response_metadata(name, did) : Result<Vec<RespParam>>
+        + <<async>> response_params(name) : Result<Vec<RespParam>>
+    }
+
+    together {
+        class DidResolver {
+            - manager : CdaEcuManager
+            == resolve.rs -- DID --> service name ==
+            + <<async>> resolve(service_type, did, uds) : Option<ResolvedService>
+            - <<async>> resolve_service_did(sid, did, label) : Option<String>
+            - {static} build_did_candidates(manager, did_prefix, sid, did, label) : Option<Vec<String>>
+            - {static} <<async>> match_candidate_did(manager, name, sid, did) : bool
+            - {static} <<async>> probe_service_did(manager, name, sid, meta) : Option<u16>
+        }
+
+        class ResponseEncoder {
+            - manager : CdaEcuManager
+            - metadata : MetadataProvider
+            == response.rs -- encode UDS response ==
+            + <<async>> build_response(name, sid, did, data) : Result<Vec<u8>>
+            - <<async>> encode_response_from_metadata(name, sid, did, data) : Option<(Vec<u8>, String)>
+            - <<async>> validate_response(name, sid, bytes) : ()
+        }
+
+        class MetadataProvider {
+            - manager : CdaEcuManager
+            == metadata.rs -- MDD parameter queries ==
+            + <<async>> get_request_params(name) : Result<Vec<Param>>
+            + <<async>> get_response_params(name) : Result<Vec<RespParam>>
+            + <<async>> get_enriched_response_metadata(name, did) : Result<Vec<RespParam>>
+            + <<async>> get_enriched_response_metadata_with_source(name, did) : Result<(Vec<RespParam>, String)>
+            + <<async>> lookup_service_names_by_sid(sid) : Result<Vec<String>>
+            + <<async>> get_mux_cases_for_service(name) : Result<Vec<MuxCase>>
+        }
+    }
+
+    note right of DidResolver
+
+        <b>Resolution algorithm:</b>
+        1. lookup_diagcomms_by_request_prefix([SID,DID_HI,DID_LO])
+        2. Single match  -->  service name found (fast path)
+        3. Multiple candidates  -->  inspect request parameter metadata:
+           * CodedConst   -- exact DID value match
+           * PhysConst    -- coded_value or create_uds_payload probe
+           * Value        -- coded_default or CompuScale range match
+        4. No match  -->  log error, return None (no fallback)
+    end note
+
+    note right of ResponseEncoder
+        <b>Response encoding:</b>
+        Walk MDD POS-RESPONSE parameters:
+        * CODED-CONST        --> fixed byte (e.g. response SID 0x62)
+        * MatchingRequestParam --> echo DID bytes from request
+        * VALUE              --> SOVD JSON value at MDD-defined offset
+        Opaque STRUCTURE types trigger MUX sibling lookup
+        via MetadataProvider.get_enriched_response_metadata_with_source().
+    end note
+
+    class uds_helpers <<module: free functions>> {
+        ' -- pub re-exports --
+        + parse_mux_coded_value(coded) : Option<u64>
+        + find_mux_case_prefix(meta, did) : Option<String>
+        + has_mux_case_for_did_exact(meta, did) : bool
+        == internal helpers ==
+        ~ extract_did_from_uds(data) : Option<u16>
+        ~ diag_comm_type(sid) : DiagCommType
+        ~ make_diag_comm(name, sid) : DiagComm
+        ~ make_service_payload(data) : ServicePayload
+        ~ encode_unsigned_be(num) : Vec<u8>
+        ~ parse_u64_literal(value) : Option<u64>
+        ~ find_did_param(meta, sid) : Option<Param>
+        ~ did_matches_compu_scales(scales, did) : bool
+        ~ encode_value_at(buf, pos, size, value) : ()
+        ~ value_to_bytes(value) : Vec<u8>
+    }
+
+    note bottom of uds_helpers
+        Top 3 are pub re-exported from mod.rs.
+    end note
+
+    class ResolvedService <<struct>> {
+        + name : String
+        + params : Map
+    }
+
+    ServiceResolver *--> DidResolver : resolver (private)
+    ServiceResolver *--> ResponseEncoder : encoder (private)
+    ServiceResolver *--> MetadataProvider : metadata (private)
+    ResponseEncoder o--> MetadataProvider : holds (explicit dependency)
+    DidResolver ..> uds_helpers : uses
+    ResponseEncoder ..> uds_helpers : uses
+    DidResolver ..> ResolvedService : returns
+}
+
+' ─────────────────────────────────────────────────────────────────
+' CDA (external dependency — cda-core / cda-interfaces)
+' ─────────────────────────────────────────────────────────────────
+package "cda-core  <size:10>(external path dep)</size>" #LightGray {
+
+    interface EcuManagerTrait <<cda-interfaces>> {
+        ' — resolution —
+        + lookup_diagcomms_by_request_prefix(prefix)
+        + get_request_parameter_metadata(service)
+        ' — response building —
+        + get_response_parameter_metadata(service)
+        + get_components_data_info(plugin)
+        + get_components_configurations_info(plugin)
+        + get_mux_cases_for_service(service)
+        ' — encoding / decoding —
+        + create_uds_payload(service, plugin, params)
+        + convert_from_uds(service, payload, true)
+        + convert_request_from_uds(service, payload, true)
+        ' — variant selection —
+        + detect_variant(responses)
+    }
+
+    class "CdaEcuManager\n<size:10><DefaultSecurityPluginData></size>" as CdaEcuManager {
+        ' Loads an MDD file (DiagnosticDatabase) and
+        ' implements EcuManagerTrait for UDS <-> MDD ops.
+    }
+
+    CdaEcuManager ..|> EcuManagerTrait
+}
+
+' ─────────────────────────────────────────────────────────────────
+' uds2sovd::config  (top-level binary config)
+' ─────────────────────────────────────────────────────────────────
+package "uds2sovd::config  <size:10>(binary config)</size>" #LightYellow {
+
+    class Config {
+        + server : ServerConfig
+        + sovd   : SovdConfig
+        + ecu    : EcuConfig
+        + logging : LoggingConfig
+        --
+        + {static} from_file(path) : Result<Self>
+    }
+}
+
+' ─────────────────────────────────────────────────────────────────
+' Ownership: ManagerHandle = Arc<RwLock<CdaEcuManager>> is created
+' in ServiceResolver::new() and distributed to each sub-component
+' via Arc::clone.  ServiceResolver itself holds no manager field.
+' ─────────────────────────────────────────────────────────────────
+DidResolver *--> CdaEcuManager : via ManagerHandle
+    (Arc<RwLock<>>)
+ResponseEncoder *--> CdaEcuManager : via ManagerHandle
+    (Arc<RwLock<>>)
+MetadataProvider *--> CdaEcuManager : via ManagerHandle
+    (Arc<RwLock<>>)
+
+note on link
+    ManagerHandle = Arc<RwLock<EcuManager<DefaultSecurityPluginData>>>.
+    Each sub-component receives an Arc::clone from ServiceResolver::new()
+    to allow concurrent async read access.
+end note
+
+@enduml
