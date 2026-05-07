@@ -23,7 +23,16 @@ feature-depth = 1
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-ignore = []
+# RUSTSEC-2023-0071: Marvin attack — timing side-channel in `rsa` crate PKCS#1 v1.5
+# decryption. This advisory is suppressed because:
+#   1. `rsa` is an *indirect* dependency only, pulled in transitively through
+#      `jsonwebtoken` → `cda-interfaces` (Eclipse CDA project).
+#   2. The proxy does not perform RSA decryption operations directly.
+#   3. Upgrading is blocked on the CDA project updating its `jsonwebtoken` dependency.
+# ACTION: Remove this suppression once `cda-interfaces` no longer depends on a
+#         vulnerable `rsa` version. Re-evaluate on every `cda-*` dependency update.
+# Reference: https://rustsec.org/advisories/RUSTSEC-2023-0071
+ignore = ["RUSTSEC-2023-0071"]
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
@@ -32,10 +41,24 @@ ignore = []
 # List of explicitly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
-allow = ["Apache-2.0", "MIT"]
-
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-3-Clause",
+  "Zlib",
+  "ISC",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+]
 confidence-threshold = 0.9
-exceptions = []
+exceptions = [
+  # unicode-ident is a transitive dependency pulled in by serde (via proc-macro2).
+  # It is licensed under Unicode-3.0, an OSI-approved license covering only
+  # Unicode data tables. There is no Apache-2.0 or MIT alternative for this crate.
+  { allow = [
+    "Unicode-3.0",
+  ], name = "unicode-ident" },
+]
 
 [licenses.private]
 ignore = true
@@ -65,11 +88,23 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
-  # Internal dependency
+  # Eclipse OpenSOVD organisation dependency — reviewed and trusted.
   "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git",
-  # TODO: Verify if below personal fork is necessary, it could break if the original repository is updated or fork no longer maintained
-  "https://github.com/alexmohr/aide.git",
+
+  # ⚠ SUPPLY-CHAIN RISK — personal forks outside Eclipse governance.
+  # These are required because cda-database/cda-interfaces depend on them.
+  # They are NOT under Eclipse IP policy and may be abandoned or diverge.
+  # Track removal in: https://github.com/eclipse-opensovd/classic-diagnostic-adapter
+  #
+  # alexmohr/flatbuffers: adds TaggedUnion/BuildVector/UnionVectorWIPOffsets
+  #   API symbols absent from upstream flatbuffers 25.x registry releases.
+  #   Required by cda-database generated flatbuffers code.
+  #   Patched into this workspace via [patch.crates-io] in Cargo.toml.
   "https://github.com/alexmohr/flatbuffers.git",
+  #
+  # alexmohr/aide: patches serde_qs compatibility (0.14→1.0 API gap) inside CDA.
+  #   Not directly used by this proxy.
+  "https://github.com/alexmohr/aide.git",
 ]
 
 [sources.allow-org]
