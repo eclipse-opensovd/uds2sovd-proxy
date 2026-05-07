@@ -5,3 +5,8 @@ version = 4
 [[package]]
 name = "uds2sovd-proxy"
 version = "0.1.0"
+
+[[patch.unused]]
+name = "flatbuffers"
+version = "25.9.23"
+source = "git+https://github.com/alexmohr/flatbuffers.git?rev=0ba3307d#0ba3307d110a6def7419ad1158245cdf47c6d0c5"
