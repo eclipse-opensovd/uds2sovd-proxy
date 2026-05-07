@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+
+[package]
+name = "sovd"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "SOVD gateway integration (ISO 22900-4): HTTP client, MDD-driven service resolver, and UDS-to-SOVD mapper."
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+uds = { workspace = true }
+async-trait = { workspace = true }
+# ---- SOVD HTTP client ----
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+# ---- JSON / serialisation ----
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+# ---- Async runtime ----
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+# ---- Tracing ----
+tracing = { workspace = true, features = ["std"] }
+# ---- MDD / CDA resolver ----
+cda-core = { workspace = true }
+cda-database = { workspace = true }
+cda-interfaces = { workspace = true }
+cda-plugin-security = { workspace = true }
+
+[lints]
+workspace = true
