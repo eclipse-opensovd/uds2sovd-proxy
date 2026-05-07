@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+
+[package]
+name = "uds"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "UDS protocol primitives: error types, Nrc, DiagHandler trait, and UDS SID constants.  Zero heavy dependencies — safe to embed in any DoIP or SOVD crate."
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+# Error derive macros only — no async runtime, no CDA, no network.
+thiserror = { workspace = true, features = ["std"] }
+# Object-safe async trait for DiagHandler.
+async-trait = { workspace = true }
+
+[dev-dependencies]
+# Minimal async runtime for unit tests only — not a production dependency.
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

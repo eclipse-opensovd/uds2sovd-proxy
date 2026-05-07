@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+
+# pre-commit hook configuration for uds2sovd-proxy.
+#
+# These hooks run on the non-Rust layer: file hygiene, merge-conflict
+# markers, YAML/TOML syntax, and binary-size guards. Rust-specific checks
+# (clippy, rustfmt, cargo deny) are handled by the CI workflows:
+#   .github/workflows/build.yml
+#   .github/workflows/pr-checks.yml
+#
+# Install hooks once per clone:
+#   pre-commit install
+#
+# Run all hooks manually:
+#   pre-commit run --all-files
+#
+# NOTE — SPDX / REUSE compliance:
+#   Full REUSE lint (https://reuse.software) requires a LICENSES/ directory.
+#   Until that is added, SPDX headers are enforced by code review and CI.
+#   Track: add `reuse` hook once LICENSES/Apache-2.0.txt is committed.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Prevent commits with unresolved merge-conflict markers — catching these
+      # early is especially important in a safety-critical codebase where a
+      # stale <<<<<<< HEAD could silently drop a safety-relevant code path.
+      - id: check-merge-conflict
+
+      # Enforce consistent line endings (LF) across platforms.
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+      # Trailing whitespace causes spurious diffs and can confuse SPDX tools.
+      - id: trailing-whitespace
+        # MDD files are binary — exclude them from text processing.
+        exclude: \.mdd$
+
+      # Ensure every text file ends with exactly one newline.
+      - id: end-of-file-fixer
+        exclude: \.mdd$
+
+      # Catch YAML syntax errors before they reach CI.
+      - id: check-yaml
+
+      # Catch TOML syntax errors in Cargo manifests and config files before
+      # they reach CI — a broken Cargo.toml fails the entire build matrix.
+      - id: check-toml
+
+      # Case-insensitive file-system collision guard (relevant for Windows CI).
+      - id: check-case-conflict
+
+      # Guard against accidentally committing large binary artifacts.
+      # MDD files are the largest expected test assets; raise the limit if
+      # a new test asset is added and document the reason in the PR.
+      - id: check-added-large-files
+        args: [--maxkb=2048]
