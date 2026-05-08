@@ -20,10 +20,6 @@ on:
 permissions:
   contents: read
 
-env:
-  PYTHON_VERSION: 3.13
-  PRE_COMMIT_VERSION: 4.2
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -33,4 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checks
-        uses: eclipse-opensovd/cicd-workflows/pre-commit-action@b90aee53ba1739e08f7991d24241b23903a8c11a
+        uses: eclipse-opensovd/cicd-workflows/pre-commit-action@feat/pre-commit-hook-args-config
+        with:
+          rust-toolchain: "1.88"
