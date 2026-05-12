@@ -8,15 +8,47 @@
 # terms of the Apache License Version 2.0 which is available at
 # https://www.apache.org/licenses/LICENSE-2.0
 
-[package]
-name = "uds2sovd-proxy"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://github.com/eclipse-opensovd/uds2sovd-proxy"
 
-[lints]
-workspace = true
+[workspace]
+resolver = "3"
+members = [
+  "proxy-core",
+  "proxy-sovd",
+  "proxy-doip",
+  "proxy-main",
+]
+
+[workspace.dependencies]
+proxy-core = { path = "proxy-core" }
+proxy-doip = { path = "proxy-doip" }
+proxy-sovd = { path = "proxy-sovd" }
+cda-core = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-database = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-interfaces = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+cda-plugin-security = { git = "https://github.com/eclipse-opensovd/classic-diagnostic-adapter.git", rev = "cf7fd9c18a7c49467e9e6c9ceae1e771c613e49b" }
+
+# ---- common crates ----
+async-trait = "0.1.89"
+thiserror = "2.0.17"
+serde = "1.0"
+serde_json = "1.0"
+tokio = { version = "1.48.0", default-features = false }
+bytes = "1"
+clap = "4.6.1"
+toml = "0.9.8"
+
+# ---- networking crates ----
+reqwest = { version = "0.12.24", default-features = false }
+url = { version = "2", features = ["serde"] }
+
+# ---- tracing & logging crates ----
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", default-features = false }
 
 # Lints are aligned with shared-lints.toml from:
 # https://github.com/eclipse-opensovd/cicd-workflows/tree/main/shared-lints
@@ -44,3 +76,10 @@ clone_on_ref_ptr = "warn"
 # enforce that the type suffix of a literal is always appended directly
 # eg. 12u8 instead of 12_u8
 separated_literal_suffix = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
+
+[patch.crates-io]
+aide = { git = "https://github.com/alexmohr/aide.git", rev = "56355cb" }
+flatbuffers = { git = "https://github.com/alexmohr/flatbuffers.git", rev = "0ba3307d" }
