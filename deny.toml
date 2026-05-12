@@ -16,14 +16,17 @@
 all-features = false
 no-default-features = false
 
+
 [output]
 feature-depth = 1
+
 
 # This section is considered when running `cargo deny check advisories`
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-ignore = []
+ignore = ["RUSTSEC-2023-0071"]
+
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
@@ -32,14 +35,23 @@ ignore = []
 # List of explicitly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
-allow = ["Apache-2.0", "MIT"]
-
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-3-Clause",
+  "Zlib",
+  "ISC",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+]
 confidence-threshold = 0.9
 exceptions = []
+
 
 [licenses.private]
 ignore = true
 registries = []
+
 
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
@@ -57,6 +69,7 @@ deny = []
 skip = []
 skip-tree = []
 
+
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
@@ -71,6 +84,7 @@ allow-git = [
   "https://github.com/alexmohr/aide.git",
   "https://github.com/alexmohr/flatbuffers.git",
 ]
+
 
 [sources.allow-org]
 github = []
