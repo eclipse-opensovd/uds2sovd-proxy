@@ -8,15 +8,31 @@
 # terms of the Apache License Version 2.0 which is available at
 # https://www.apache.org/licenses/LICENSE-2.0
 
-[package]
-name = "uds2sovd-proxy"
-version = "0.1.0"
+[workspace.package]
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://github.com/eclipse-opensovd/uds2sovd-proxy"
 
-[lints]
-workspace = true
+[workspace]
+resolver = "3"
+members = ["doip-server"]
+
+[workspace.dependencies]
+# ---- async runtime ----
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+# ---- serialization ----
+serde = { version = "1.0", default-features = false }
+toml = { version = "0.9", default-features = false }
+# ---- tracing & logging ----
+tracing = { version = "0.1", default-features = false }
+# ---- error handling ----
+thiserror = { version = "2.0", default-features = false }
+# ---- data structures ----
+bytes = { version = "1.0", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
+# ---- utility crates ----
+hex = { version = "0.4", default-features = false }
 
 # Lints are aligned with shared-lints.toml from:
 # https://github.com/eclipse-opensovd/cicd-workflows/tree/main/shared-lints
@@ -44,3 +60,13 @@ clone_on_ref_ptr = "warn"
 # enforce that the type suffix of a literal is always appended directly
 # eg. 12u8 instead of 12_u8
 separated_literal_suffix = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
+
+[profile.release.package."*"]
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

@@ -1,0 +1,205 @@
+@startuml flowchart
+
+skinparam backgroundColor #FAFAFA
+skinparam activity {
+  BackgroundColor #EEF4FF
+  BorderColor #4A7CC7
+  FontSize 12
+  ArrowColor #4A7CC7
+  StartColor #4A7CC7
+  EndColor #C0392B
+  DiamondBackgroundColor #FFF9E3
+  DiamondBorderColor #E67E22
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #F9A825
+}
+
+start
+
+:DoipServer::new(\n  Arc<ServerConfig>, Arc<dyn UdsHandler>);
+note right: ServerConfig::from_file()\nor ServerConfig::default()
+
+:CancellationToken::new();
+
+fork
+  :tokio::spawn(\n  UdpListener::start(token.clone()));
+  note right: Stateless — handles Vehicle\nIdentification broadcasts (UDP)
+fork again
+  :tokio::spawn(\n  TcpListener::start(token.clone()));
+end fork
+
+' ── TcpListener accept loop ──
+repeat
+
+  if (token.is_cancelled()?) then (yes)
+    :Graceful shutdown;
+    stop
+  else (no)
+  endif
+
+  :TcpListener::accept() → TcpStream\n(peer_addr);
+
+  :SessionManager::create_session(peer_addr);
+  note right: Session { state=Connected\n  tester_address=0\n  last_activity=Instant::now() }
+
+  fork
+    :tokio::spawn(TcpConnection::run());
+  fork again
+    :Continue accepting\nnew connections;
+  end fork
+
+  ' ── Per-connection task (TcpConnection::run) ──
+
+  repeat
+
+    if (token.is_cancelled()?) then (yes)
+      :tcp_stream.shutdown();
+      :SessionManager::remove_session(id);
+      stop
+    else (no)
+    endif
+
+    :SessionManager::check_timeouts(config);
+    if (session timed out?) then (yes)
+      if (state == Connected\n&& elapsed > initial_ms?) then (yes)
+        :Initial inactivity — no routing\nactivation received in time;
+        :tcp_stream.shutdown();
+        :SessionManager::remove_session(id);
+        stop
+      else (RoutingActive)
+        :Send AliveCheckRequest [0x0007];
+        if (AliveCheckResponse within\nT_TCP_Alive_Check?) then (yes)
+          :SessionManager::reset_inactivity_timer(id);
+        else (no)
+          :Err(DoipError::AliveCheckTimeout);
+          :tcp_stream.shutdown();
+          :SessionManager::remove_session(id);
+          stop
+        endif
+      endif
+    else (no)
+    endif
+
+    :Wait for bytes on TCP stream;
+
+    :DoipCodec::decode(src: BytesMut);
+
+    if (src.len < 8 bytes?) then (yes)
+      :return Ok(None)\nwait for more data;
+    else (no)
+    endif
+
+    :DoipHeader::parse(header_slice);
+
+    if (Header valid?\nversion + inverse XOR = 0xFF) then (no)
+      :return Err(DoipError::InvalidHeader);
+      :Close TCP connection;
+      stop
+    else (yes)
+    endif
+
+    if (payload_length > max_payload_size?) then (yes)
+      :return Err(DoipError::MessageTooLarge);
+      :Close TCP connection;
+      stop
+    else (no)
+    endif
+
+    if (src.len < 8 + payload_length?) then (yes)
+      :return Ok(None)\nwait for more data;
+    else (no)
+    endif
+
+    :split_to → DoipMessage { header, payload: Bytes };
+
+    :MessageDispatcher::dispatch(\n  DoipPayload::parse(msg), session_id);
+
+    if (payload_type known?) then (no)
+      :DoipError::UnknownPayloadType;
+      :Send GenericNack(UnknownPayloadType);
+    else (yes)
+
+      switch (payload_type?)
+
+      case (0x0005\nRoutingActivationRequest)
+        :RoutingActivationHandler::handle(\n  req, session_id);
+        if (Session already RoutingActive\nwith same address?) then (yes)
+          :RoutingActivationResponse::denial(\n  SourceAddressAlreadyActive);
+        elseif (Max connections reached?) then (yes)
+          :RoutingActivationResponse::denial(\n  AllSocketsRegistered);
+        else (no)
+          :SessionManager::update_session_state(\n  session_id, SA);
+          note right: Session.state = RoutingActive\nSession.last_activity = Instant::now()
+          :RoutingActivationResponse::success(\n  tester_addr, entity_addr);
+        endif
+        :DoipCodec::encode(RoutingActivationResponse);
+        :Send bytes on TCP;
+
+      case (0x0007\nAliveCheckRequest)
+        :AliveCheckHandler::handle(req, session_id);
+        :AliveCheckRequest::parse(payload)\n[zero-length, always Ok];
+        :AliveCheckResponse::new(\n  session.tester_address());
+        :to_bytes() → [addr_hi, addr_lo];
+        :DoipCodec::encode(AliveCheckResponse\ntype=0x0008);
+        :Send 10 bytes on TCP;
+
+      case (0x0008\nAliveCheckResponse)
+        :AliveCheckHandler::handle_response(\n  resp, session_id);
+        :AliveCheckResponse::parse(payload)\n→ tester_address: u16;
+        if (tester_address matches\nsession.tester_address()?) then (yes)
+          :SessionManager::reset_inactivity_timer(id);
+        else (no)
+          :Log mismatch\nClose TCP connection;
+          stop
+        endif
+
+      case (0x8001\nDiagnosticMessage)
+        if (session.is_routing_active()?) then (no)
+          :DiagnosticAck::negative(\n  InvalidSourceAddress);
+          :Send DiagnosticMessageNegativeAck\n(type=0x8003);
+        else (yes)
+          :DiagnosticMessage::parse(payload)\n→ SA, TA, user_data;
+          :DiagnosticAck::positive(TA, SA);
+          :Send DiagnosticMessagePositiveAck\n(type=0x8002);
+          :UdsRequest::new(SA, TA, user_data);
+          :UdsHandler::handle(UdsRequest)\n→ Result<UdsResponse>\n[USER IMPLEMENTATION];
+          if (Ok(UdsResponse)?) then (yes)
+            :DiagnosticMessage::new(\n  SA=entity, TA=tester, data);
+            :DoipCodec::encode(DiagnosticMessage\ntype=0x8001);
+            :Send UDS response bytes on TCP;
+          else (Err(ApplicationError))
+            :Send GenericNack or log error;
+          endif
+        endif
+
+      case (0x0001/0x0002/0x0003\nVehicleIdRequest)
+        note right: Handled by UdpListener (stateless).\nTCP connections send GenericNack.
+        :Send GenericNack\n(IncorrectPatternFormat);
+
+      case (other)
+        :Send GenericNack\n(IncorrectPatternFormat);
+
+      endswitch
+
+    endif
+
+  repeat while (TCP connection open?) is (yes)
+  -> no;
+
+  :SessionManager::remove_session(id);
+  note right: Session dropped\nstate=Closed
+
+repeat while (token.is_cancelled() == false) is (yes)
+-> no;
+
+:CancellationToken::cancel()
+(DoipServer::stop() called);
+:All TcpConnection tasks receive
+cancellation signal → shutdown;
+:DoipServer::start() returns Ok(());
+
+stop
+
+@enduml

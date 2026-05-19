@@ -1,0 +1,296 @@
+@startuml sequence
+
+' ==========================================================
+' Abstraction shown via 3 techniques:
+'   1. box grouping  — Public Interface vs Internal Impl
+'   2. self-calls    — hidden internal logic (X -> X)
+'   3. boundary note — <<boundary>> marks abstraction edge
+' ==========================================================
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+skinparam sequence {
+  ArrowColor              #4A7CC7
+  LifeLineBorderColor     #4A7CC7
+  LifeLineBackgroundColor #EBF5FB
+  ParticipantBackgroundColor #EEF4FF
+  ParticipantBorderColor  #4A7CC7
+  ParticipantFontStyle    bold
+  ActorBorderColor        #4A7CC7
+  ActorBackgroundColor    #EBF5FB
+  NoteBackgroundColor     #FFFDE7
+  NoteBorderColor         #E0AC00
+  GroupBackgroundColor    #F5F5F5
+  GroupBorderColor        #BDBDBD
+  BoxBackgroundColor      #FAFAFA
+  BoxBorderColor          #4A7CC7
+  ParticipantPadding      20
+  MessageSpacing          15
+}
+
+' ── Abstraction Technique 1: box grouping ─────────────────
+box "Public Interface — visible to user" #D5F5E3
+  actor Tester as T #EBF5FB
+  participant "DoipServer\n(pub)" as DS #D5F5E3
+end box
+
+box "Internal Implementation — pub(crate) only" #EEF4FF
+  participant "UdpListener"       as UDP  #EEF4FF
+  participant "TcpListener"       as TCP  #EEF4FF
+  participant "TcpConnection"     as Conn  #EEF4FF
+  participant "DoipCodec"         as Codec #FEF9E7
+  participant "MessageDispatcher" as Disp  #EEF4FF
+  participant "UdsHandler\n(user impl)" as UDS #F9F3FF
+end box
+
+' ── Abstraction Technique 3: boundary note ────────────────
+note over DS, UDS
+  <<abstraction boundary>>
+  Tester interacts only with DoipServer (pub).
+  UdpListener, TcpListener, TcpConnection, DoipCodec,
+  MessageDispatcher are all pub(crate) — invisible externally.
+  UdsHandler is pub — user implements it, library calls it.
+end note
+
+' ──────────────────────────────────────────────────────────
+== 0. Server Initialization ==
+' ──────────────────────────────────────────────────────────
+
+note over DS, TCP #FFFDE7
+  Arc<ServerConfig> shared by all components at construction.
+  Holds: VIN · EID · GID · logical_address
+         tcp_addr · udp_addr · max_connections
+         initial_inactivity_ms · general_inactivity_ms
+end note
+
+DS -> DS  : DoipServer::new(Arc<ServerConfig>,\n  Arc<dyn UdsHandler>)
+DS -> DS  : CancellationToken::new()
+DS -> UDP : UdpListener::new(Arc<ServerConfig>)
+DS -> UDP : UdpSocket::bind(config.udp_addr())
+DS -> TCP : TcpListener::new(Arc<ServerConfig>,\n  Arc<SessionManager>, Arc<dyn UdsHandler>)
+DS -> TCP : TcpSocket::bind(config.tcp_addr())
+DS -> DS  : tokio::spawn(UdpListener::start(token.clone()))
+DS -> DS  : tokio::spawn(TcpListener::start(token.clone()))
+
+' ──────────────────────────────────────────────────────────
+== 1. Vehicle Identification (UDP, ISO §7.5) ==
+' ──────────────────────────────────────────────────────────
+T   ->  UDP  : VehicleIdentificationRequest [0x0001]\n<i>(UDP broadcast)</i>
+
+note over UDP #FFFDE7
+  <<boundary>> enters internal impl
+end note
+
+' Abstraction Technique 2: self-calls = hidden logic
+UDP -> UDP  : DoipCodec::decode(bytes) → DoipMessage
+UDP -> UDP  : DoipPayload::parse(&msg)
+
+alt VehicleIdRequest [0x0001] — broadcast (no filter)
+  UDP -> UDP  : respond unconditionally
+else VehicleIdRequestWithEid [0x0002]
+  UDP -> UDP  : req.eid() == config.eid() → match
+else VehicleIdRequestWithVin [0x0003]
+  UDP -> UDP  : req.vin() == config.vin() → match
+end
+
+UDP -> UDP  : VehicleIdResponse::new(\n  config.vin(), config.logical_address(),\n  config.eid(), config.gid())
+UDP -> UDP  : DoipCodec::encode(response) → bytes
+
+note over UDP #FFFDE7
+  <<boundary>> returns to public interface
+end note
+
+UDP -->  T  : VehicleIdentificationResponse [0x0004]
+
+' ──────────────────────────────────────────────────────────
+== 2. TCP Connection Establishment ==
+' ──────────────────────────────────────────────────────────
+T   ->  TCP  : TCP connect (port 13400)
+TCP -> TCP  : TcpListener::accept() → TcpStream
+TCP -> TCP  : check_max_connections()
+TCP -> Conn : tokio::spawn(TcpConnection::run(TcpStream))
+Conn -> Conn : SessionManager::create_session(peer_addr)\nstate = Connected
+TCP -->  T  : connection accepted
+
+' ──────────────────────────────────────────────────────────
+== 3. Alive Check (ISO §7.6) ==
+' ──────────────────────────────────────────────────────────
+Conn ->  T   : AliveCheckRequest [0x0007]
+T    -> Conn : AliveCheckResponse [0x0008]\n<i>tester_address (2 bytes)</i>
+
+note over Conn, Disp #FFFDE7
+  <<boundary>> enters internal impl
+end note
+
+Conn  -> Codec : decode(bytes) → DoipMessage
+Codec --> Conn : Ok(AliveCheckResponse)
+Conn  -> Disp  : dispatch(AliveCheckResponse, session_id)
+Disp  -> Disp  : AliveCheckHandler::handle_response(resp, session_id)
+Disp  -> Disp  : SessionManager::reset_inactivity_timer(session_id)
+
+' ──────────────────────────────────────────────────────────
+== 4. Routing Activation (ISO §7.7) ==
+' ──────────────────────────────────────────────────────────
+T    -> Conn : RoutingActivationRequest [0x0005]\n<i>SA=0x0E00</i>
+
+note over Conn, Codec #FFFDE7
+  <<boundary>> enters internal impl
+end note
+
+Conn  -> Codec : decode(bytes)
+Codec -> Codec : parse_header()
+Codec -> Codec : validate_version()
+Codec -> Codec : check_payload_size()
+Codec --> Conn : Ok(RoutingActivationRequest)
+
+Conn  -> Disp  : dispatch(RoutingActivationRequest, session_id)
+Disp  -> Disp  : RoutingActivationHandler::handle(req, session_id)
+Disp  -> Disp  : SessionManager::is_tester_registered(SA) → false
+Disp  -> Disp  : SessionManager::update_session_state(\n  session_id, SA=0x0E00) → RoutingActive
+
+Conn  -> Codec : encode(RoutingActivationResponse)
+Codec --> Conn : bytes
+
+note over Conn, Codec #FFFDE7
+  <<boundary>> returns to public interface
+end note
+
+alt success
+  Conn --> T : RoutingActivationResponse [0x0006]\n<i>code=SuccessfullyActivated(0x10)</i>
+else max connections reached
+  Conn --> T : RoutingActivationResponse [0x0006]\n<i>code=AllSocketsRegistered(0x01)</i>
+else address already active
+  Conn --> T : RoutingActivationResponse [0x0006]\n<i>code=SourceAddressAlreadyActive(0x03)</i>
+end
+
+' ──────────────────────────────────────────────────────────
+== 5. Diagnostic Message (ISO §7.9) ==
+' ──────────────────────────────────────────────────────────
+T    -> Conn : DiagnosticMessage [0x8001]\n<i>SA=0x0E00  TA=0xE000  data=[0x10,0x03]</i>
+
+note over Conn, Codec #FFFDE7
+  <<boundary>> enters internal impl
+end note
+
+Conn  -> Codec : decode(bytes)
+Codec --> Conn : Ok(DiagnosticMessage)
+Conn  -> Disp  : dispatch(DiagnosticMessage, session_id)
+Disp  -> Disp  : SessionManager::is_routing_active(session_id) → true
+Conn  -> Codec : encode(DiagnosticMessagePositiveAck)
+Codec --> Conn : bytes
+
+note over Conn, Codec #FFFDE7
+  <<boundary>> returns to public interface
+end note
+
+Conn  --> T   : DiagnosticMessagePositiveAck [0x8002]
+
+note over Disp, UDS #FFFDE7
+  <<boundary>> enters UDS layer
+end note
+
+Disp  ->  UDS  : handle(UdsRequest\nSA=0x0E00, TA=0xE000, data=[0x10,0x03])
+UDS   -> UDS   : process_service()
+UDS   -> UDS   : build_response(data=[0x50,0x03])
+UDS   --> Disp : Ok(UdsResponse { data=[0x50,0x03] })
+
+note over Disp, UDS #FFFDE7
+  <<boundary>> returns from UDS layer
+end note
+
+Disp  --> Conn : Ok(DiagnosticMessage response)
+Conn  -> Codec : encode(DiagnosticMessage response)
+Codec --> Conn : bytes
+Conn  --> T   : DiagnosticMessage [0x8001]\n<i>data=[0x50,0x03] (positive response)</i>
+
+group Routing NOT Active
+  T    -> Conn : DiagnosticMessage [0x8001]\n<i>SA=0x0E99</i>
+  Conn -> Codec : decode(bytes)
+  Codec --> Conn : Ok(DiagnosticMessage)
+  Conn -> Disp  : dispatch(DiagnosticMessage, session_id)
+  Disp -> Disp  : SessionManager::is_routing_active(session_id) → false
+  Conn -> Codec : encode(DiagnosticMessageNegativeAck)
+  Codec --> Conn : bytes
+  Conn --> T   : DiagnosticMessageNegativeAck [0x8003]\n<i>code=InvalidSourceAddress(0x02)</i>
+end
+
+' ──────────────────────────────────────────────────────────
+== 6. Generic NACK ==
+' ──────────────────────────────────────────────────────────
+T    -> Conn  : [unknown payload 0x00FF]
+Conn -> Codec : decode(bytes)
+Codec --> Conn : Ok(DoipMessage { type=0x00FF })
+Conn -> Disp  : dispatch(msg, session_id)
+Disp -> Disp  : DoipPayload::parse() → Err(UnknownPayloadType)
+Disp --> Conn : Err(DoipError::UnknownPayloadType)
+Conn -> Codec  : encode(GenericNack)
+Codec --> Conn : bytes
+Conn --> T     : GenericNack [0x0000]\n<i>code=UnknownPayloadType(0x01)</i>
+
+' ──────────────────────────────────────────────────────────
+== 7. Disconnection ==
+' ──────────────────────────────────────────────────────────
+
+alt Tester-initiated disconnect
+  T    ->x Conn : TCP FIN / RST (tester closes connection)
+  Conn -> Conn  : read() returns EOF
+  Conn -> Conn  : SessionManager::remove_session(id)
+  Conn -> Conn  : tcp_stream.shutdown()
+note over Conn #FFFDE7
+  Server detects close via read() EOF.
+  No explicit disconnect API — tester owns initiation.
+end note
+else Server-initiated disconnect (inactivity timeout)
+  Conn -> Conn  : check_timeouts(config) → session expired
+  Conn -> Conn  : SessionManager::remove_session(id)
+  Conn -> Conn  : tcp_stream.shutdown()
+  Conn -->  T   : TCP close
+note over Conn #FFFDE7
+  Server closes after T_TCP_Initial or T_TCP_General
+  timer fires with no response from tester.
+end note
+end
+
+' ──────────────────────────────────────────────────────────
+== 8. Graceful Shutdown ==
+' ──────────────────────────────────────────────────────────
+note over DS #FFFDE7
+  DoipServer::stop() called\n(e.g. SIGINT / OS signal)
+end note
+
+DS  -> DS  : token.cancel()
+DS  -> UDP : CancellationToken::cancelled() → triggered
+DS  -> TCP : CancellationToken::cancelled() → triggered
+UDP -> UDP : UdpSocket::close()
+TCP -> TCP : TcpListener::close()
+Conn -> Conn : token.cancelled() → exit run() loop
+Conn -> Conn : SessionManager::remove_session(id)
+DS  -> DS  : DoipServer::start() returns Ok(())
+
+' ──────────────────────────────────────────────────────────
+== 9. Session Timeout ==
+' ──────────────────────────────────────────────────────────
+note over Conn #FFFDE7
+  T_TCP_Initial (2 s) or T_TCP_General (5 min)\ninactivity timer fires inside TcpConnection::run()
+end note
+
+Conn -> Conn  : SessionManager::check_timeouts(config)\n→ Vec<expired_session_id>
+
+alt initial inactivity — no routing activation before T_TCP_Initial
+  Conn -> Conn  : session.state == Connected &&\n  elapsed > initial_inactivity_ms
+  Conn -> Conn  : SessionManager::remove_session(id)
+  Conn -> Conn  : tcp_stream.shutdown()
+  Conn --> T    : TCP close\n<i>(routing not activated in time)</i>
+else general inactivity — RoutingActive but no UDS traffic
+  Conn -> Conn  : session.state == RoutingActive &&\n  elapsed > general_inactivity_ms
+  Conn ->  T    : AliveCheckRequest [0x0007]
+  T    -> Conn  : AliveCheckResponse [0x0008]
+  Conn -> Conn  : SessionManager::reset_inactivity_timer(id)
+else alive check timeout — no response received
+  Conn -> Conn  : Err(DoipError::AliveCheckTimeout)
+  Conn -> Conn  : SessionManager::remove_session(id)
+  Conn -> Conn  : tcp_stream.shutdown()
+  Conn --> T    : TCP close\n<i>(alive check timed out)</i>
+end
+
+@enduml

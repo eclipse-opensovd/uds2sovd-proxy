@@ -1,0 +1,464 @@
+@startuml ClassDiagram
+' ==========================================================
+' Crisp layered overview of the DoIP server (ISO 13400-2).
+'
+' Colour key:
+'   Blue  (#EBF5FB) — Wire / TCP framing layer
+'   Teal  (#E8F8F5) — Payload dispatch & shared traits
+'   Light (#EEF4FF) — DoIP message types (one pkg per §)
+'   Green (#EAFAF1) — Server & session management
+'   Amber (#FEF9E7) — UDS integration (user extension point)
+' ==========================================================
+
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam defaultFontSize 12
+skinparam arrowColor #555555
+skinparam backgroundColor white
+
+skinparam class {
+  BackgroundColor #EEF4FF
+  BorderColor #4A7CC7
+  HeaderBackgroundColor #4A7CC7
+  HeaderFontColor white
+}
+skinparam interface {
+  BackgroundColor #FFF8E1
+  BorderColor #F9A825
+  HeaderBackgroundColor #F9A825
+  HeaderFontColor white
+}
+skinparam package {
+  BackgroundColor #FAFAFA
+  BorderColor #BDBDBD
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #E0AC00
+}
+
+' ══════════════════════════════════════════════════════════
+' 1. TCP FRAMING
+' ══════════════════════════════════════════════════════════
+package "TCP Framing" #EBF5FB {
+
+  class DoipCodec {
+    - state: AwaitingHeader | AwaitingPayload
+    - max_payload_size: u32
+    ..
+    + new() : Self
+    + with_max_payload_size(n: u32) : Self
+  }
+
+  class DoipMessage {
+    + header: DoipHeader
+    + payload: Bytes
+  }
+
+  class DoipHeader <<8-byte generic header §6>> {
+    version: u8           ' 0x02 = ISO 13400-2:2019
+    inverse_version: u8   ' version XOR 0xFF
+    payload_type: u16
+    payload_length: u32   ' big-endian
+    ..
+    + parse(bytes) : Result<Self>
+    + validate() : Option<GenericNackCode>
+  }
+
+  enum PayloadType <<Table 16>> {
+    GenericNack                    = 0x0000
+    VehicleIdentificationRequest   = 0x0001
+    VehicleIdentificationReqEid    = 0x0002
+    VehicleIdentificationReqVin    = 0x0003
+    VehicleIdentificationResponse  = 0x0004
+    RoutingActivationRequest       = 0x0005
+    RoutingActivationResponse      = 0x0006
+    AliveCheckRequest              = 0x0007
+    AliveCheckResponse             = 0x0008
+    DiagnosticMessage              = 0x8001
+    DiagnosticMessagePositiveAck   = 0x8002
+    DiagnosticMessageNegativeAck   = 0x8003
+  }
+
+  enum GenericNackCode <<Table 17>> {
+    IncorrectPatternFormat  = 0x00
+    UnknownPayloadType      = 0x01
+    MessageTooLarge         = 0x02
+    OutOfMemory             = 0x03
+    InvalidPayloadLength    = 0x04
+  }
+}
+
+note right of DoipCodec
+  Two-state TCP reassembler:
+  **AwaitingHeader** (8 bytes) →
+  **AwaitingPayload** (declared length)
+  Drops connection on bad header.
+  DoS guard: rejects payload > max_payload_size.
+end note
+
+' ══════════════════════════════════════════════════════════
+' 2. PAYLOAD DISPATCH & SHARED TRAITS
+' ══════════════════════════════════════════════════════════
+package "Payload Dispatch" #E8F8F5 {
+
+  interface DoipParseable <<trait>> {
+    + parse(payload: &[u8]) : Result<Self>
+  }
+
+  interface DoipSerializable <<trait>> {
+    + write_to(buf: &mut BytesMut)
+    + to_bytes() : Bytes
+    + serialized_len() : Option<usize>
+  }
+
+  enum DoipPayload <<typed dispatch envelope>> {
+    AliveCheckRequest / AliveCheckResponse
+    RoutingActivationRequest / RoutingActivationResponse
+    DiagnosticMessage
+    DiagnosticMessagePositiveAck / NegativeAck
+    VehicleIdentificationRequest / WithEid / WithVin
+    VehicleIdentificationResponse
+    GenericNack(GenericNackCode)
+    ..
+    + parse(msg: &DoipMessage) : Result<Self>
+    + payload_type() : PayloadType
+  }
+}
+
+note right of DoipPayload
+  Single entry-point for decoding any DoIP message.
+  Matches on PayloadType and delegates to the
+  correct module's parse() automatically.
+  Every variant wraps a fully-typed struct.
+end note
+
+' ══════════════════════════════════════════════════════════
+' 3. DoIP MESSAGE TYPES
+' ══════════════════════════════════════════════════════════
+
+package "Alive Check  (ISO §7.6)" #EEF4FF {
+  class AliveCheckRequest <<zero-length payload>> {}
+  class AliveCheckResponse {
+    tester_address: u16
+  }
+}
+
+package "Routing Activation  (ISO §7.7)" #EEF4FF {
+  class RoutingActivationRequest {
+    source_address: u16
+    activation_type: ActivationType
+    reserved: u32
+    oem_specific: Option<u32>
+  }
+  class RoutingActivationResponse {
+    tester_address: u16
+    entity_address: u16
+    response_code: ActivationResponseCode
+    reserved: u32
+    oem_specific: Option<u32>
+    ..
+    + success(tester, entity) : Self
+    + denial(tester, entity, code) : Self
+    + is_success() : bool
+  }
+  enum ActivationType <<Table 24>> {
+    Default         = 0x00
+    WwhObd          = 0x01
+    CentralSecurity = 0xE0
+  }
+  enum ActivationResponseCode <<Table 25>> {
+    SuccessfullyActivated      = 0x10
+    ConfirmationRequired       = 0x11
+    -- denial codes --
+    UnknownSourceAddress       = 0x00
+    AllSocketsRegistered       = 0x01
+    DifferentSourceAddress     = 0x02
+    SourceAddressAlreadyActive = 0x03
+    MissingAuthentication      = 0x04
+    RejectedConfirmation       = 0x05
+    UnsupportedActivationType  = 0x06
+    TlsRequired                = 0x07
+  }
+}
+
+package "Diagnostic Message  (ISO §7.9)" #EEF4FF {
+  class DiagnosticMessage {
+    source_address: u16
+    target_address: u16
+    user_data: Bytes    ' UDS payload (min 1 byte)
+    ..
+    + service_id() : Option<u8>
+  }
+  class DiagnosticAck {
+    source_address: u16
+    target_address: u16
+    result: AckResult
+    previous_data: Option<Bytes>
+    ..
+    + positive(src, tgt) : Self
+    + negative(src, tgt, code) : Self
+  }
+  enum AckResult {
+    Positive               ' 0x00
+    Negative(DiagnosticNackCode)
+  }
+  enum DiagnosticNackCode <<Table 28>> {
+    InvalidSourceAddress      = 0x02
+    UnknownTargetAddress      = 0x03
+    DiagnosticMessageTooLarge = 0x04
+    OutOfMemory               = 0x05
+    TargetUnreachable         = 0x06
+    UnknownNetwork            = 0x07
+    TransportProtocolError    = 0x08
+  }
+}
+
+package "Vehicle Identification  (ISO §7.5)" #EEF4FF {
+  class VehicleIdRequest <<broadcast — no filter>> {}
+  class VehicleIdRequestWithEid {
+    eid: [u8; 6]
+  }
+  class VehicleIdRequestWithVin {
+    vin: [u8; 17]
+  }
+  class VehicleIdResponse {
+    vin: [u8; 17]
+    logical_address: u16
+    eid: [u8; 6]
+    gid: [u8; 6]
+    further_action: FurtherAction
+    sync_status: Option<GidSyncStatus>
+  }
+}
+
+' ══════════════════════════════════════════════════════════
+' 4. INTERNAL IMPLEMENTATION  (crate-only)
+' ══════════════════════════════════════════════════════════
+package "Internal Implementation  (- = crate-only)" #EBF5FB {
+
+  class TcpListener {
+    - config: Arc<ServerConfig>
+    - sessions: Arc<SessionManager>
+    - handler: Arc<dyn UdsHandler>
+    ..
+    + new(config, sessions, handler) : Self
+    + start(token: CancellationToken) : Result<()>
+    - accept_connection() : Result<TcpStream>
+  }
+
+  class UdpListener {
+    - config: Arc<ServerConfig>
+    ..
+    + new(config: Arc<ServerConfig>) : Self
+    + start(token: CancellationToken) : Result<()>
+    - receive_message() : Result<DoipMessage>
+    - send_response(peer, response)
+  }
+
+  class TcpConnection {
+    - session_id: u64
+    - codec: DoipCodec
+    - dispatcher: MessageDispatcher
+    - sessions: Arc<SessionManager>
+    ..
+    + run() : Result<()>
+    - handle_message() : Result<()>
+    - send_response(msg: DoipMessage)
+    - send_alive_check()
+    - close()
+  }
+
+  note right of TcpConnection
+    SRP: transport only.
+    send_alive_check() = I/O action.
+    Protocol logic lives in
+    MessageDispatcher handles.
+  end note
+
+  class MessageDispatcher {
+    - routing: RoutingActivationHandler
+    - alive: AliveCheckHandler
+    - diag: Arc<dyn UdsHandler>
+    - sessions: Arc<SessionManager>
+    ..
+    + new(sessions, handler) : Self
+    + dispatch(payload: DoipPayload,\n  session_id: u64) : Result<DoipMessage>
+  }
+
+  note right of MessageDispatcher
+    Strategy pattern:
+    each handler is a focused unit.
+    Only dispatcher mutates
+    session protocol state.
+  end note
+
+  class RoutingActivationHandler {
+    + handle(req, session_id,\n  sessions) : Result<DoipMessage>
+  }
+
+  class AliveCheckHandler {
+    + handle_response(resp, session_id,\n  sessions) : Result<()>
+  }
+
+  class SessionManager {
+    - sessions: Mutex<HashMap<u64, Session>>
+    - next_id: AtomicU64
+    ..
+    + new() : Arc<Self>
+    + create_session(peer_addr: SocketAddr) : Session
+    + get_session(id: u64) : Option<Session>
+    + remove_session(id: u64)
+    + update_session_state(id: u64, tester_addr: u16)
+    + reset_inactivity_timer(id: u64)
+    + check_timeouts(config) : Vec<u64>
+  }
+
+  note right of SessionManager
+    Thread-safe session store.
+    One Session per active TCP connection.
+    Enforces max_connections limit.
+  end note
+
+  enum SessionState <<ISO §7.4 lifecycle>> {
+    Connected
+    RoutingActive
+    Closed
+  }
+
+  class Session {
+    - id: u64
+    - peer_addr: SocketAddr
+    - tester_address: u16
+    - state: SessionState
+    - last_activity: Instant
+    ..
+    + is_routing_active() : bool
+    + tester_address() : u16
+  }
+}
+
+' ══════════════════════════════════════════════════════════
+' 5. PUBLIC INTERFACE  (user API)
+' ══════════════════════════════════════════════════════════
+package "Public Interface  (+ = user API)" #EAFAF1 {
+
+  class DoipServer {
+    - udp: UdpListener
+    - tcp: TcpListener
+    - token: CancellationToken
+    ..
+    + new(config: Arc<ServerConfig>,\n    handler: Arc<dyn UdsHandler>) : Self
+    + start() : Result<()>
+    + stop()
+    - handle_udp()
+    - handle_tcp()
+  }
+
+  class ServerConfig {
+    + tcp_addr: SocketAddr
+    + udp_addr: SocketAddr
+    + logical_address: u16
+    + vin: [u8; 17]
+    + eid: [u8; 6]
+    + gid: [u8; 6]
+    + max_connections: usize
+    + initial_inactivity_ms: u64
+    + general_inactivity_ms: u64
+    ..
+    + from_file(path) : Result<Self>
+    + default() : Self
+  }
+
+  interface UdsHandler <<implement this trait to\nconnect your ECU logic>> {
+    + handle(request: UdsRequest) : Result<UdsResponse>
+  }
+
+  note right of UdsHandler
+    Returns Result — handler
+    can signal ECU errors.
+    Implement this trait to
+    connect your ECU logic.
+  end note
+
+  class UdsRequest {
+    source_address: u16
+    target_address: u16
+    payload: Bytes
+    ..
+    + service_id() : Option<u8>
+  }
+
+  class UdsResponse {
+    source_address: u16
+    target_address: u16
+    payload: Bytes
+  }
+}
+
+' ══════════════════════════════════════════════════════════
+' RELATIONSHIPS
+' ══════════════════════════════════════════════════════════
+
+' — TCP framing —
+DoipCodec     ..> DoipMessage            : frames
+DoipMessage   *-- DoipHeader
+DoipHeader    --> PayloadType
+
+' — Dispatch —
+DoipPayload   ..> DoipMessage            : parse()
+DoipPayload   --> AliveCheckRequest
+DoipPayload   --> AliveCheckResponse
+DoipPayload   --> RoutingActivationRequest
+DoipPayload   --> RoutingActivationResponse
+DoipPayload   --> DiagnosticMessage
+DoipPayload   --> DiagnosticAck
+DoipPayload   --> VehicleIdRequest
+DoipPayload   --> VehicleIdRequestWithEid
+DoipPayload   --> VehicleIdRequestWithVin
+DoipPayload   --> VehicleIdResponse
+
+' — All message types implement DoipParseable + DoipSerializable —
+note "All message types above\nimplement DoipParseable\nand DoipSerializable." as TraitNote
+DoipParseable .. TraitNote
+DoipSerializable .. TraitNote
+
+' — Enum ownership —
+RoutingActivationRequest  --> ActivationType
+RoutingActivationResponse --> ActivationResponseCode
+DiagnosticAck             --> AckResult
+AckResult                 --> DiagnosticNackCode
+
+' — Public API owns listeners —
+DoipServer o-- UdpListener           : owns
+DoipServer o-- TcpListener           : owns
+DoipServer ..> ServerConfig          : Arc<>
+DoipServer ..> UdsHandler            : Arc<dyn>
+
+' — Internal wiring —
+TcpListener   ..> ServerConfig       : Arc<>
+TcpListener   ..> SessionManager     : Arc<>
+TcpListener   ..> UdsHandler         : Arc<dyn>
+TcpListener   ..> TcpConnection      : spawns per accept
+
+UdpListener   ..> ServerConfig       : Arc<>
+
+TcpConnection  o-- DoipCodec         : Arc<>\nlifecycle only
+TcpConnection  o-- MessageDispatcher
+TcpConnection  ..> SessionManager    : Arc<>\nprotocol state only
+
+MessageDispatcher  o-- RoutingActivationHandler : owns
+MessageDispatcher  o-- AliveCheckHandler        : owns
+MessageDispatcher  ..> UdsHandler               : Arc<dyn>
+MessageDispatcher  ..> SessionManager           : Arc<>
+
+SessionManager "1" o-- "0..*" Session  : manages 1..*
+Session        *-- SessionState
+
+' — UDS bridge —
+DiagnosticMessage ..> UdsRequest  : user_data →
+UdsHandler        ..> UdsRequest  : consumes
+UdsHandler        ..> UdsResponse : produces
+
+@enduml

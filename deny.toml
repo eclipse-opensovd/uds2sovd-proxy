@@ -35,7 +35,14 @@ ignore = []
 allow = ["Apache-2.0", "MIT"]
 
 confidence-threshold = 0.9
-exceptions = []
+exceptions = [
+  # unicode-ident is a transitive dependency pulled in by serde (via proc-macro2).
+  # It is licensed under Unicode-3.0, an OSI-approved license covering only
+  # Unicode data tables. There is no Apache-2.0 or MIT alternative for this crate.
+  { allow = [
+    "Unicode-3.0",
+  ], name = "unicode-ident" },
+]
 
 [licenses.private]
 ignore = true
