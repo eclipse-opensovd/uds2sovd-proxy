@@ -1,0 +1,27 @@
+# Copyright (c) 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name        = "doip-server"
+version     = "0.1.0"
+edition     = "2024"
+rust-version = "1.85"
+description = "DoIP server binary — wires configuration, transports, and handlers"
+
+[[bin]]
+name = "doip-server"
+path = "main.rs"
+
+[dependencies]
+uds2sovd           = { path = "../src", package = "doipserver-lib" }
+tokio              = { version = "1", features = ["net", "io-util", "macros", "rt-multi-thread", "signal"] }
+tracing            = "0.1"
+tracing-subscriber = "0.3"

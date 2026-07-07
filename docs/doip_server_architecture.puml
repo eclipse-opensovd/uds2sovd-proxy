@@ -1,0 +1,176 @@
+@startuml doip_server_architecture
+
+/'  Copyright (c) 2026 Contributors to the Eclipse Foundation
+
+ See the NOTICE file(s) distributed with this work for additional
+ information regarding copyright ownership.
+
+ This program and the accompanying materials are made available under the
+ terms of the Apache License Version 2.0 which is available at
+ <https://www.apache.org/licenses/LICENSE-2.0>
+
+ SPDX-License-Identifier: Apache-2.0 '/
+
+top to bottom direction
+skinparam linetype ortho
+skinparam shadowing false
+skinparam DefaultFontSize 30
+skinparam packageStyle rectangle
+
+title DoIP Server - Architecture
+
+package "Application" {
+    class "app/main.rs" as Main {
+        +main() -> Result<(), AppError>
+    }
+    class AppError
+}
+
+package "Configuration" {
+    interface ConfigProvider {
+        +load() -> Result<ServerConfig, ConfigError>
+    }
+
+    class DefaultConfigProvider {
+        +new(config: ServerConfig)
+        +load()
+    }
+
+    class TomlConfigProvider {
+        +new(path: PathBuf)
+        +load()
+    }
+
+    class ServerConfig {
+        +into_parts() -> (TcpConfig, UdpConfig, EcuConfig)
+    }
+
+    class TcpConfig
+    class UdpConfig
+    class EcuConfig
+
+    ConfigProvider <|.. DefaultConfigProvider
+    ConfigProvider <|.. TomlConfigProvider
+    ConfigProvider --> ServerConfig : produces
+    ServerConfig --> TcpConfig
+    ServerConfig --> UdpConfig
+    ServerConfig --> EcuConfig
+}
+
+package "Server" {
+    interface Transport {
+        +start() async
+    }
+
+    class Server {
+        +new(tcp: Tcp, udp: Udp)
+        +start() async
+    }
+
+    class Tcp {
+        +new(config: TcpConfig, dispatcher: TcpDispatcher)
+        +start() async
+    }
+
+    class Udp {
+        +new(config: UdpConfig, dispatcher: UdpDispatcher)
+        +start() async
+    }
+
+    class SessionManager {
+        +new(max_sessions)
+        +try_acquire()
+    }
+
+    class Session {
+        +new(slot)
+        +run(stream, dispatcher, buf_size) async
+    }
+
+    class UdpHandler {
+        +new(dispatcher)
+        +handle(data) -> Result<Response, Error>
+    }
+
+    Server --> Tcp
+    Server --> Udp
+    Tcp ..|> Transport
+    Udp ..|> Transport
+
+    Tcp --> SessionManager
+    Tcp --> Session : spawns per connection
+    Udp --> UdpHandler
+}
+
+package "Message Model" {
+    enum TcpPayloadType
+    enum UdpPayloadType
+
+    class TcpRequest
+    class UdpRequest
+
+    class Response {
+        +new(payload_type, payload)
+        +doip_header_nack(code)
+        +to_bytes()
+    }
+
+    TcpRequest --> TcpPayloadType
+    UdpRequest --> UdpPayloadType
+}
+
+package "Protocol Processing" {
+    class "Dispatcher<PayloadType, Request>" as Dispatcher {
+        +new()
+        +register(handler)
+        +dispatch(req)
+    }
+
+    class TcpDispatcher <<type alias>>
+    class UdpDispatcher <<type alias>>
+
+    interface PayloadHandler {
+        +handle(req)
+    }
+
+    class AliveCheckHandler
+    class RoutingActivationHandler
+    class DiagnosticsHandler
+    class EntityStatusHandler
+    class VehicleIdentificationHandler
+
+    TcpDispatcher ..> Dispatcher
+    UdpDispatcher ..> Dispatcher
+    Dispatcher --> PayloadHandler : routes
+
+    AliveCheckHandler ..|> PayloadHandler
+    RoutingActivationHandler ..|> PayloadHandler
+    DiagnosticsHandler ..|> PayloadHandler
+    EntityStatusHandler ..|> PayloadHandler
+    VehicleIdentificationHandler ..|> PayloadHandler
+
+    Dispatcher ..> TcpRequest
+    Dispatcher ..> UdpRequest
+    Dispatcher ..> Response
+}
+
+package "Proxy" {
+    interface SovdProxy {
+        +process(uds_request: &[u8]) -> Result<Vec<u8>, SovdProxyError>
+    }
+
+    class StubProxy
+    SovdProxy <|.. StubProxy
+}
+
+Main --> ConfigProvider : load config
+Main --> Server : construct + start
+Main --> AppError : returns
+
+Session --> TcpDispatcher
+UdpHandler --> UdpDispatcher
+
+DiagnosticsHandler --> SovdProxy : forwards UDS payload
+
+
+@enduml

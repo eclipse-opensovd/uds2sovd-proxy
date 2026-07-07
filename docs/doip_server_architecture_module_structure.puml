@@ -1,0 +1,66 @@
+@startuml doip_server_architecture_module_structure
+!pragma useVerticalIf on
+
+/'  Copyright (c) 2026 Contributors to the Eclipse Foundation
+
+See the NOTICE file(s) distributed with this work for additional
+information regarding copyright ownership.
+
+This program and the accompanying materials are made available under the
+terms of the Apache License Version 2.0 which is available at
+<https://www.apache.org/licenses/LICENSE-2.0>
+
+SPDX-License-Identifier: Apache-2.0 '/
+
+title UDS2SOVD Architecture
+
+top to bottom direction
+
+skinparam linetype ortho
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+
+package "UDS2SOVD-Proxy" as uds2sovd_proxy  {
+    component "app" as app
+    component "config.toml" as app_config
+}
+
+package "doipserver-lib" as doipserver_lib {
+    component "server" as server {
+        component "tcp"
+        component "udp"
+    }
+    component "doip" as doip {
+        component "tcp_dispatcher"
+        component "udp_dispatcher"
+        component "handlers" as handlers {
+            component "diagnostic"
+            component "discovery"
+        }
+    }
+    component "proxy" as proxy {
+        component "stub_proxy"
+    }
+    component "error\n- provides error types" as error
+    component "config" as config {
+        component "config_provider" as config_provider
+    }
+}
+
+uds2sovd_proxy -[hidden]down-> doipserver_lib
+app -[hidden]down-> config
+server -[hidden]down-> doip
+doip -[hidden]down-> handlers
+proxy -[hidden]down-> error
+
+app --> server: instantiates
+app --> app_config: uses
+app --> config_provider: gets server_config
+
+tcp --> tcp_dispatcher: forwards\nTCP messages
+udp --> udp_dispatcher: forwards\nUDP messages
+diagnostic -up-> tcp_dispatcher: registered with
+discovery -up-> udp_dispatcher: registered with
+diagnostic --> stub_proxy: forwards\ndiagnostic payloads
+
+@enduml

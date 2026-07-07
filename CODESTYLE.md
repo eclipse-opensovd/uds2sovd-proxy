@@ -12,6 +12,28 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 # Code Style Guide
 
+## Quick Links
+
+- **View API Documentation** (recommended): 
+  ```sh
+  cargo doc-lib
+  ```
+  Opens the main library documentation with architecture overview, diagrams, and all modules
+
+- **View All Workspace Crates** (no dependencies):
+  ```sh
+  cargo doc-all
+  ```
+  Shows doipserverlib, doip-server, and Example (test client) — no external dependency docs
+
+- **View All with Dependencies**:
+  ```sh
+  cargo doc-full
+  ```
+  Includes all external dependency documentation (verbose)
+
+Available cargo aliases are defined in `.cargo/config.toml`
+
 ## Linting & Clippy
 
 - **Clippy**: Always run with `clippy::pedantic` enabled for stricter linting.
@@ -79,7 +101,24 @@ Additionally the import granularity is set to `crate` to group all imports from 
 
 ## Documentation
 
-- Document all public items with `///` doc comments.
-- Use clear, concise language and provide context for complex logic.
+### Rustdoc Standards
 
----
+- **Module-level documentation**: All public modules must have `//!` comments explaining:
+  - Purpose and role of the module
+  - Key types and functions
+  - Relationships to other modules (if helpful)
+
+- **Public items**: All public structs, enums, traits, and functions must have `///` documentation:
+  - Explain *what* the item does and *when* it should be used
+  - Include an "# Errors" section for fallible operations
+  - Add "# Example" sections only where usage patterns aren't obvious
+
+- **Language and clarity**:
+  - Use clear, concise language without unnecessary verbosity
+  - Avoid long paragraphs; prefer short, focused explanations
+  - Link to existing architecture documents instead of duplicating large explanations
+
+- **Build documentation locally**:
+  ```sh
+  cargo doc --no-deps --open
+  ```

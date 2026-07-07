@@ -8,4 +8,14 @@
 // terms of the Apache License Version 2.0 which is available at
 // https://www.apache.org/licenses/LICENSE-2.0
 
-fn main() {}
+//! Configuration provider implementations.
+//!
+//! Provides:
+//! - [`DefaultConfigProvider`] for in-memory configuration
+//! - [`TomlConfigProvider`] for TOML-backed configuration
+
+pub mod default_config;
+pub mod toml;
+
+pub use default_config::DefaultConfigProvider;
+pub use toml::TomlConfigProvider;

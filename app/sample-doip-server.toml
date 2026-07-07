@@ -1,0 +1,41 @@
+# Copyright (c) 2026 The Contributors to Eclipse OpenSOVD (see CONTRIBUTORS)
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Sample DoIP Server Configuration
+# Usage: cargo run -p doip-server -- sample-doip-server.toml
+
+[tcp]
+# TCP listener bind address and port (ISO 13400-2 default: 13400)
+address = "127.0.0.1:13400"
+# Maximum concurrent TCP connections
+max_connections = 10
+# DoIP logical address of this entity
+logical_address = 1
+# Read buffer size in bytes per connection
+read_buffer_size = 4096
+
+[udp]
+# UDP socket bind address and port (ISO 13400-2 default: 13400)
+address = "0.0.0.0:13400"
+# DoIP logical address of this entity
+logical_address = 1
+
+[ecu]
+# Vehicle Identification Number — 17 ASCII bytes (ISO 3779)
+# Each value is the ASCII code of the character: '0' = 48, 'A' = 65, etc.
+# Below represents VIN "00000000000000000"
+vin = [48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48]
+# Entity Identifier — 6 bytes, typically the MAC address of the DoIP interface
+# Example: MAC 00:00:00:00:00:00
+eid = [0, 0, 0, 0, 0, 0]
+# Group Identifier — 6 bytes, groups DoIP entities on the same subnet
+# Example: GID 00:00:00:00:00:00
+gid = [0, 0, 0, 0, 0, 0]
