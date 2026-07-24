@@ -1,0 +1,47 @@
+@startuml doip_server
+/'  Copyright (c) 2026 Contributors to the Eclipse Foundation
+
+See the NOTICE file(s) distributed with this work for additional
+information regarding copyright ownership.
+
+This program and the accompanying materials are made available under the
+terms of the Apache License Version 2.0 which is available at
+<https://www.apache.org/licenses/LICENSE-2.0>
+
+SPDX-License-Identifier: Apache-2.0 '/
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #White
+skinparam defaultFontSize 12
+skinparam packageStyle rectangle
+
+component "UDS Tester" as uds_tester
+
+package "UDS-to-SOVD Proxy" as uds2sovd_proxy #Azure {
+    package "DoIP Server" as doip_server #LightGoldenRodYellow {
+        component "server" as server #LightCyan {
+            component "tcp"
+            component "udp"
+        }
+        component "doip" as doip #LightCyan {
+            component "tcp_dispatcher"
+            component "udp_dispatcher"
+            component "handlers" as handlers {
+                component "diagnostic " as diagnostic
+                component "discovery" as discovery
+            }
+        }
+    }
+
+    component "UDS-to-SOVD Translation" as translation
+}
+
+uds_tester <--> udp: Discovery
+uds_tester <--> tcp: Diagnostic
+tcp --> tcp_dispatcher: forwards\nTCP messages
+udp --> udp_dispatcher: forwards\nUDP messages
+diagnostic -up-> tcp_dispatcher: registered with
+discovery -up-> udp_dispatcher: registered with
+diagnostic <--> translation: diagnostic payloads
+
+@enduml

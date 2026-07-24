@@ -1,0 +1,75 @@
+/'  Copyright (c) 2026 Contributors to the Eclipse Foundation
+
+ See the NOTICE file(s) distributed with this work for additional
+ information regarding copyright ownership.
+
+ This program and the accompanying materials are made available under the
+ terms of the Apache License Version 2.0 which is available at
+ <https://www.apache.org/licenses/LICENSE-2.0>
+
+ SPDX-License-Identifier: Apache-2.0 '/
+
+
+@startuml doip_server_tcp_connection
+title DoIP Server TCP Connection
+
+<style>
+sequenceDiagram {
+    LineType ortho
+    MessageAlign center
+    ResponseMessageBelowArrow true
+    ParticipantPadding 40
+}
+</style>
+
+participant "Client" as Client
+participant "TCP Service" as Tcp
+participant "Session" as Sess
+participant "UDS-to-SOVD" as Proxy
+
+== Connection Establishment ==
+
+Client -> Tcp: connect (port 13400)
+
+alt maximum sessions reached
+Tcp -> Client: connection rejected
+Tcp ->x Client: close connection
+
+else session accepted
+Tcp -> Sess: spawn session
+end
+
+== Request Processing ==
+
+loop until disconnect or failure
+
+
+Client -> Sess: DoIP request
+
+alt invalid request
+    Sess -> Client: negative acknowledgment
+
+else diagnostic message
+    Sess -> Proxy: forward diagnostic payload
+    Proxy --> Sess: diagnostic response
+    Sess -> Client: diagnostic response
+
+else supported request
+    Sess -> Client: response
+end
+
+note right of Sess
+    communication failure
+    terminates session
+end note
+
+
+end
+
+== Session Cleanup ==
+
+note over Sess
+    session ends
+    slot dropped automatically
+end note
+@enduml

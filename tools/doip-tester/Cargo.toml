@@ -9,12 +9,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-.env
-.cache
-.gradle
-.vscode
+[package]
+name         = "doip-tester"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.85"
+description  = "DoIP tester client - simulates the external UDS tester"
 
-build
-/target
-
-compile_commands.json
+[[bin]]
+name = "doip-tester"
+path = "main.rs"

@@ -12,12 +12,22 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 # Code Style Guide
 
+## Quick Links
+
+- **View API Documentation** (recommended): 
+  ```sh
+  cargo doc-lib
+  ```
+  Opens the main library documentation with architecture overview, diagrams, and all modules
+
+Available cargo aliases are defined in `.cargo/config.toml`; use the README for build and documentation entry points.
+
 ## Linting & Clippy
 
 - **Clippy**: Always run with `clippy::pedantic` enabled for stricter linting.
-  - Example: `cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic`
+  - example: `cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic`
 - **Allow/Forbid**: Use `#[allow(...)]` only when necessary, and always document the reason.
-  - Example: `#[allow(clippy::ref_option)] // Not compatible with serde derive`
+  - example: `#[allow(clippy::ref_option)] // Not compatible with serde derive`
 - **Warnings**: Treat all warnings as errors.
 
 ## Formatting
@@ -39,7 +49,7 @@ cargo +nightly fmt -- --check --config error_on_unformatted=true,error_on_line_o
 ```
 
 It is recommended to configure your IDE to use nightly rustfmt with these settings as well.
-Example for VS Code:
+example for VS Code:
 ```json
 "rust-analyzer.rustfmt.overrideCommand": [
     "rustfmt",
@@ -79,7 +89,24 @@ Additionally the import granularity is set to `crate` to group all imports from 
 
 ## Documentation
 
-- Document all public items with `///` doc comments.
-- Use clear, concise language and provide context for complex logic.
+### Rustdoc Standards
 
----
+- **Module-level documentation**: All public modules must have `//!` comments explaining:
+  - Purpose and role of the module
+  - Key types and functions
+  - Relationships to other modules (if helpful)
+
+- **Public items**: All public structs, enums, traits, and functions must have `///` documentation:
+  - Explain *what* the item does and *when* it should be used
+  - Include an "# Errors" section for fallible operations
+  - Add "# example" sections only where usage patterns aren't obvious
+
+- **Language and clarity**:
+  - Use clear, concise language without unnecessary verbosity
+  - Avoid long paragraphs; prefer short, focused explanations
+  - Link to existing architecture documents instead of duplicating large explanations
+
+- **Build documentation locally**:
+  ```sh
+  cargo doc --no-deps --open
+  ```

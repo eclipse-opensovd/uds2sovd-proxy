@@ -1,0 +1,45 @@
+/'  Copyright (c) 2026 Contributors to the Eclipse Foundation
+
+ See the NOTICE file(s) distributed with this work for additional
+ information regarding copyright ownership.
+
+ This program and the accompanying materials are made available under the
+ terms of the Apache License Version 2.0 which is available at
+ <https://www.apache.org/licenses/LICENSE-2.0>
+
+ SPDX-License-Identifier: Apache-2.0 '/
+@startuml doip_server_udp_request
+title DoIP Server UDP Request Handling
+<style>
+sequenceDiagram {
+    LineType ortho
+    MessageAlign center
+    ResponseMessageBelowArrow true
+    ParticipantPadding 40
+}
+</style>
+
+participant "Client" as Client
+participant "UDP Service" as Udp
+
+== Receive Loop ==
+
+loop waiting for datagrams
+
+    Client -> Udp: discovery request (port 13400)
+
+    alt valid identification request
+        Udp -> Client: vehicle announcement (VIN, EID, address)
+    else EID/VIN does not match
+        note right of Udp
+            silent drop (ISO 7.6.1)
+        end note
+    else entity status request
+        Udp -> Client: node type and capacity
+    else invalid request
+        Udp -> Client: negative acknowledgment
+    end
+
+end
+
+@enduml
